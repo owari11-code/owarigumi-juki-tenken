@@ -93,6 +93,21 @@ p { margin: 8px 0; }
 .breadcrumb { font-size: 13px; color: var(--gray); margin-bottom: 8px; word-break: break-all; }
 .breadcrumb a { color: var(--green); }
 
+/* 画面上部の戻る導線。指で押しやすい大きさを確保する */
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  margin: -4px 0 4px -6px;
+  padding: 4px 10px;
+  color: var(--green);
+  font-size: 15px;
+  font-weight: 700;
+  text-decoration: none;
+  border-radius: 8px;
+}
+.back-link:active { background: var(--green-light); }
+
 .card {
   background: #fff;
   border: 1px solid var(--line);

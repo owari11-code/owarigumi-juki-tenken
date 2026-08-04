@@ -126,6 +126,11 @@
     return { path: path, params: params };
   }
 
+  /** 画面上部に置く戻る導線 */
+  function backLink(href, label) {
+    return '<a class="back-link" href="' + href + '">‹ ' + esc(label) + '</a>';
+  }
+
   function crumbs(items) {
     return '<div class="breadcrumb">' + items.map(function (it, i) {
       var text = esc(it.text);
@@ -242,7 +247,7 @@
    * ------------------------------------------------------------------ */
   function renderSite(site) {
     var machines = Store.listMachines(site.id);
-    var html = crumbs([{ text: '現場一覧', href: '#/' }, { text: site.name }]);
+    var html = backLink('#/', '現場一覧へ戻る');
     html += '<h1>' + esc(site.name) + '</h1>';
 
     var meta = [];
@@ -284,6 +289,10 @@
       '</div>' +
       '<div class="btn-row">' +
       '<a class="btn plain" href="#/site/' + encodeURIComponent(site.id) + '/edit">現場情報を編集</a>' +
+      '</div>' +
+      // 重機が多い現場では画面が長くなるため、下にも戻る導線を置く
+      '<div class="btn-row">' +
+      '<a class="btn secondary" href="#/">‹ 現場一覧へ戻る</a>' +
       '</div>';
 
     app.innerHTML = html;
