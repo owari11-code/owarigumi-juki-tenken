@@ -352,6 +352,12 @@ table.data th { background: var(--green-light); font-weight: 700; white-space: n
 .record-page { page-break-after: always; break-after: page; }
 .record-page:last-child { page-break-after: auto; break-after: auto; }
 
+/* 点検項目の表。印刷時は2項目を横に並べて1ページに収める */
+table.data.items .i-res { width: 4.2em; text-align: center; white-space: nowrap; }
+table.data.two-up { table-layout: fixed; }
+table.data.two-up .i-label { width: 32%; word-break: break-word; }
+table.data.two-up .i-res { width: 18%; }
+
 @media print {
   .no-print, .app-header, .toast { display: none !important; }
   body { background: #fff; font-size: 11pt; }
@@ -365,7 +371,21 @@ table.data th { background: var(--green-light); font-weight: 700; white-space: n
   .record-doc .approval th { background: #eee !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .record-doc .approval { font-size: 9pt; }
   a { color: #000; text-decoration: none; }
-  @page { size: A4; margin: 12mm; }
+  .table-scroll { overflow: visible; }
+
+  /* 点検記録表を1件＝A4・1ページに収めるための詰め */
+  .record-doc.compact .doc-title { font-size: 15pt; }
+  .record-doc.compact .doc-head { padding-bottom: 4px; margin-bottom: 6px; }
+  .record-doc.compact .meta { margin-bottom: 6px; }
+  .record-doc.compact .meta th,
+  .record-doc.compact .meta td { padding: 2px 6px; }
+  .record-doc.compact h3 { font-size: 10pt; margin: 7px 0 2px; }
+  .record-doc.compact table.data th,
+  .record-doc.compact table.data td { padding: 2px 5px; line-height: 1.35; }
+  .record-doc.compact .approval td { height: 13mm; width: 24mm; }
+  .record-doc.compact { page-break-inside: avoid; break-inside: avoid; }
+
+  @page { size: A4; margin: 10mm; }
 }
 
 @media (min-width: 700px) {

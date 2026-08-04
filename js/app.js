@@ -652,11 +652,36 @@
     });
   }
 
-  /** 記録1件分の帳票HTML（画面表示・印刷で共用） */
-  function recordDocHtml(rec) {
+  /**
+   * 点検項目の表。
+   * compact=true（印刷用）では2項目を横に並べ、A4・1ページに収める。
+   * 並びは左の列を上から下、続いて右の列（画面の並び順と同じ）。
+   */
+  function itemsTableHtml(items, results, compact) {
+    function cells(it) {
+      if (!it) return '<td class="i-label"></td><td class="i-res"></td>';
+      var v = results ? results[it.id] : undefined;
+      return '<td class="i-label">' + esc(it.label) + '</td>' +
+        '<td class="i-res">' + resultLabel(v) + '</td>';
+    }
+    var html = '<div class="table-scroll"><table class="data items' +
+      (compact ? ' two-up' : '') + '"><tbody>';
+    if (compact) {
+      var rows = Math.ceil(items.length / 2);
+      for (var i = 0; i < rows; i++) {
+        html += '<tr>' + cells(items[i]) + cells(items[i + rows]) + '</tr>';
+      }
+    } else {
+      items.forEach(function (it) { html += '<tr>' + cells(it) + '</tr>'; });
+    }
+    return html + '</tbody></table></div>';
+  }
+
+  /** 記録1件分の帳票HTML（画面表示・印刷で共用。compact=印刷用の詰めた体裁） */
+  function recordDocHtml(rec, compact) {
     var site = Store.getSite(rec.siteId);
     var sections = D.sectionsFor(rec.phase, rec.machineType);
-    var html = '<div class="record-doc card">';
+    var html = '<div class="record-doc card' + (compact ? ' compact' : '') + '">';
     html +=
       '<div class="doc-head">' +
       '<div><div class="doc-title">建設機械　日常点検記録表</div>' +
@@ -675,13 +700,7 @@
       '</tbody></table>';
 
     sections.forEach(function (sec) {
-      html += '<h3>' + esc(sec.title) + '</h3>' +
-        '<div class="table-scroll"><table class="data"><tbody>';
-      sec.items.forEach(function (it) {
-        var v = rec.results ? rec.results[it.id] : undefined;
-        html += '<tr><td>' + esc(it.label) + '</td><td style="width:5em;text-align:center">' + resultLabel(v) + '</td></tr>';
-      });
-      html += '</tbody></table></div>';
+      html += '<h3>' + esc(sec.title) + '</h3>' + itemsTableHtml(sec.items, rec.results, compact);
     });
 
     html += '<h3>不具合の内容</h3><div class="table-scroll"><table class="data"><tbody><tr><td>' +
@@ -895,7 +914,7 @@
       '<p class="muted no-print">印刷ダイアログで「送信先／プリンター」を<strong>「PDFに保存」</strong>にすると、PDFファイルとして保存できます（' + recs.length + '件・1件1ページ）。</p>' +
       '<div class="print-sheet">';
     recs.forEach(function (r) {
-      html += '<div class="record-page">' + recordDocHtml(r) + '</div>';
+      html += '<div class="record-page">' + recordDocHtml(r, true) + '</div>';
     });
     html += '</div>';
 
