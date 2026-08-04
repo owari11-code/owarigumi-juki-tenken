@@ -296,6 +296,12 @@ table.data th { background: var(--green-light); font-weight: 700; white-space: n
 }
 
 /* ---------- 印刷 ---------- */
+/* 余白だけを指定し、用紙サイズと向きは印刷ダイアログの設定に従わせる。
+   size を指定すると、ブラウザによっては「向き」の選択が無効になり、
+   縦を選んでも反映されなくなるため。レイアウトは幅に対する相対指定で、
+   A4縦（印刷可能幅190mm）を基準に組んである。 */
+@page { margin: 10mm; }
+
 .print-only { display: none; }
 .print-sheet { background: #fff; padding: 12px; }
 
@@ -385,7 +391,7 @@ table.data.two-up .i-res { width: 18%; }
   .record-doc.compact .approval td { height: 13mm; width: 24mm; }
   .record-doc.compact { page-break-inside: avoid; break-inside: avoid; }
 
-  @page { size: A4; margin: 10mm; }
+  @page { margin: 10mm; }
 }
 
 @media (min-width: 700px) {
