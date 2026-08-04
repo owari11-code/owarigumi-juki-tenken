@@ -66,6 +66,42 @@
 
   function go(hash) { location.hash = hash; }
 
+  /* Supabase側で最初に1回だけ実行するSQL（設定画面からコピーできる） */
+  var SETUP_SQL = [
+    '-- 点検データの置き場（1テーブルだけ）',
+    'create table if not exists public.juki_records (',
+    '  id         text primary key,',
+    '  space      text not null,',
+    '  kind       text not null,',
+    '  data       jsonb not null,',
+    '  deleted    boolean not null default false,',
+    '  updated_at timestamptz not null default now()',
+    ');',
+    '',
+    'create index if not exists juki_records_space_updated_idx',
+    '  on public.juki_records (space, updated_at);',
+    '',
+    '-- 更新のたびにサーバー側の時刻を打ち直す（取りこぼし防止）',
+    'create or replace function public.juki_touch()',
+    'returns trigger language plpgsql as $$',
+    'begin',
+    '  new.updated_at = now();',
+    '  return new;',
+    'end $$;',
+    '',
+    'drop trigger if exists juki_touch_trg on public.juki_records;',
+    'create trigger juki_touch_trg',
+    '  before insert or update on public.juki_records',
+    '  for each row execute function public.juki_touch();',
+    '',
+    '-- ログインを使わないため、匿名キーでの読み書きを許可する',
+    'alter table public.juki_records enable row level security;',
+    '',
+    'drop policy if exists "app access" on public.juki_records;',
+    'create policy "app access" on public.juki_records',
+    '  for all to anon using (true) with check (true);'
+  ].join('\n');
+
   function qs(sel) { return app.querySelector(sel); }
   function val(sel) {
     var el = qs(sel);
@@ -156,7 +192,10 @@
       field('工期（開始）', '<input type="date" id="f-from" value="' + esc(site.periodFrom || '') + '">') +
       field('工期（終了）', '<input type="date" id="f-to" value="' + esc(site.periodTo || '') + '">') +
       '</div>' +
+      '<div class="field-row">' +
       field('現場代理人', '<input type="text" id="f-manager" value="' + esc(site.manager || '') + '">') +
+      field('主任技術者', '<input type="text" id="f-engineer" value="' + esc(site.engineer || '') + '">') +
+      '</div>' +
       '</div>' +
       '<div class="btn-row">' +
       '<button class="btn" id="b-save">保存</button>' +
@@ -178,6 +217,7 @@
       site.periodFrom = from;
       site.periodTo = to;
       site.manager = val('#f-manager');
+      site.engineer = val('#f-engineer');
       Store.saveSite(site);
       toast('保存しました');
       go('#/site/' + encodeURIComponent(site.id));
@@ -211,6 +251,7 @@
     var period = periodText(site);
     if (period) meta.push('工期：' + period);
     if (site.manager) meta.push('現場代理人：' + site.manager);
+    if (site.engineer) meta.push('主任技術者：' + site.engineer);
     if (meta.length) html += '<p class="muted">' + esc(meta.join('　／　')) + '</p>';
 
     html += '<h2>登録重機（' + machines.length + '台）</h2>';
@@ -519,6 +560,7 @@
       html += '<div class="alert info">異常なし（すべて良／該当なし）</div>';
     }
     html += recordDocHtml(rec);
+    html += approvalFormHtml(rec);
     html +=
       '<div class="btn-row">' +
       '<a class="btn" href="#/print/records?record=' + encodeURIComponent(rec.id) + '">この記録を印刷／PDF保存</a>' +
@@ -529,12 +571,76 @@
       '</div>';
 
     app.innerHTML = html;
+    bindApprovalForm(rec);
     qs('#b-del').onclick = function () {
       if (!confirm('この点検記録を削除します。よろしいですか？')) return;
       Store.deleteInspection(rec.id);
       toast('削除しました');
       go('#/machine/' + encodeURIComponent(rec.machineId));
     };
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 点検内容の確認（現場代理人・主任技術者）
+   * ------------------------------------------------------------------ */
+  function approvalFormHtml(rec) {
+    var site = Store.getSite(rec.siteId);
+    var html = '<h2>確認</h2>' +
+      '<p class="section-note">点検内容を確認した方が入力してください。' +
+      '印刷した用紙に押印する場合は、空欄のままで構いません。</p>' +
+      '<div class="card">';
+    APPROVAL_ROLES.forEach(function (role) {
+      var a = approvalOf(rec, role.key);
+      html += '<div class="approve-row">' +
+        '<div class="approve-role">' + esc(role.name) + '</div>';
+      if (a) {
+        var st = formatStamp(a.at);
+        html += '<div class="approve-done">' +
+          '<span class="badge ok">確認済</span> ' + esc(a.name) +
+          '<span class="muted">（' + esc(st.date) + ' ' + esc(st.time) + '）</span>' +
+          '</div>' +
+          '<button class="btn small plain" data-unapprove="' + esc(role.key) + '">取消</button>';
+      } else {
+        var def = (site && site[role.siteField]) || '';
+        html += '<input type="text" data-approve-name="' + esc(role.key) + '" value="' + esc(def) + '" placeholder="氏名">' +
+          '<button class="btn small" data-approve="' + esc(role.key) + '">確認</button>';
+      }
+      html += '</div>';
+    });
+    html += '</div>';
+    return html;
+  }
+
+  function bindApprovalForm(rec) {
+    APPROVAL_ROLES.forEach(function (role) {
+      var okBtn = app.querySelector('[data-approve="' + role.key + '"]');
+      if (okBtn) {
+        okBtn.onclick = function () {
+          var input = app.querySelector('[data-approve-name="' + role.key + '"]');
+          var name = input.value.trim();
+          if (!name) { toast('氏名を入力してください'); input.focus(); return; }
+          var fresh = Store.getInspection(rec.id);
+          if (!fresh) { toast('この記録は削除されています'); return; }
+          fresh.approvals = fresh.approvals || {};
+          fresh.approvals[role.key] = { name: name, at: new Date().toISOString() };
+          Store.saveInspection(fresh);
+          toast(role.name + 'の確認を記録しました');
+          renderRecord(Store.getInspection(rec.id));
+        };
+      }
+      var undoBtn = app.querySelector('[data-unapprove="' + role.key + '"]');
+      if (undoBtn) {
+        undoBtn.onclick = function () {
+          if (!confirm(role.name + 'の確認を取り消します。よろしいですか？')) return;
+          var fresh = Store.getInspection(rec.id);
+          if (!fresh) { toast('この記録は削除されています'); return; }
+          if (fresh.approvals) delete fresh.approvals[role.key];
+          Store.saveInspection(fresh);
+          toast('取り消しました');
+          renderRecord(Store.getInspection(rec.id));
+        };
+      }
+    });
   }
 
   /** 記録1件分の帳票HTML（画面表示・印刷で共用） */
@@ -544,8 +650,9 @@
     var html = '<div class="record-doc card">';
     html +=
       '<div class="doc-head">' +
-      '<div class="doc-title">建設機械　日常点検記録表</div>' +
-      '<div>' + esc(D.phaseName(rec.phase)) + '</div>' +
+      '<div><div class="doc-title">建設機械　日常点検記録表</div>' +
+      '<div class="doc-sub">' + esc(D.phaseName(rec.phase)) + '</div></div>' +
+      approvalBoxHtml(rec) +
       '</div>';
 
     var contractNo = rec.siteContractNo || (site ? site.contractNo : '') || '';
@@ -574,6 +681,42 @@
       (rec.action ? esc(rec.action).replace(/\n/g, '<br>') : '－') + '</td></tr></tbody></table></div>';
     html += '</div>';
     return html;
+  }
+
+  /* 確認欄で使う役職の定義 */
+  var APPROVAL_ROLES = [
+    { key: 'manager', name: '現場代理人', siteField: 'manager' },
+    { key: 'engineer', name: '主任技術者', siteField: 'engineer' }
+  ];
+
+  function approvalOf(rec, key) {
+    return (rec.approvals && rec.approvals[key]) || null;
+  }
+
+  /** 確認時刻は保存はISO（世界時）、表示は端末の時刻に直す */
+  function formatStamp(iso) {
+    var d = new Date(iso);
+    if (!iso || isNaN(d.getTime())) {
+      return { date: String(iso || '').slice(0, 10), time: String(iso || '').slice(11, 16) };
+    }
+    return {
+      date: d.getFullYear() + '年' + (d.getMonth() + 1) + '月' + d.getDate() + '日',
+      time: pad(d.getHours()) + ':' + pad(d.getMinutes())
+    };
+  }
+
+  /** 帳票右上の確認欄。アプリで確認済みなら氏名と日付、未確認なら押印用の空欄になる */
+  function approvalBoxHtml(rec) {
+    var cells = APPROVAL_ROLES.map(function (role) {
+      var a = approvalOf(rec, role.key);
+      return '<td>' + (a
+        ? '<span class="ap-name">' + esc(a.name) + '</span>' +
+          '<span class="ap-date">' + esc(formatStamp(a.at).date) + '</span>'
+        : '') + '</td>';
+    }).join('');
+    return '<table class="approval"><thead><tr>' +
+      APPROVAL_ROLES.map(function (r) { return '<th>' + esc(r.name) + '</th>'; }).join('') +
+      '</tr></thead><tbody><tr>' + cells + '</tr></tbody></table>';
   }
 
   function resultLabel(v) {
@@ -779,7 +922,13 @@
       '<button class="btn secondary" id="b-syncnow">今すぐ同期</button>' +
       '</div>' +
       '<p class="muted">同じ「共有コード」を使う端末どうしでデータが共有されます。' +
-      'この3項目を <code>js/config.js</code> に書いて公開しておくと、QRから開いた端末すべてに自動で設定されます。</p>' +
+      'この3項目を <code>js/config.js</code> に書いて公開しておくと、QRから開いた端末すべてに自動で設定されます。<br>' +
+      'URLは <code>https://〇〇.supabase.co</code> まで。末尾の <code>/rest/v1/</code> は付けても自動で取り除きます。</p>' +
+      '<details class="sql-box"><summary>Supabase側の準備（初回だけ必要なSQL）</summary>' +
+      '<p class="muted">Supabaseの左メニュー <strong>SQL Editor</strong> を開き、下のSQLを貼り付けて <strong>Run</strong> を押してください。' +
+      'これを実行しないと「テーブル juki_records がまだありません」と表示されます。</p>' +
+      '<div class="btn-row"><button class="btn small secondary" id="b-copysql">SQLをコピー</button></div>' +
+      '<pre id="sql-text">' + esc(SETUP_SQL) + '</pre></details>' +
       '</div>' +
 
       '<h2>QRコードに埋め込むURL</h2>' +
@@ -828,7 +977,9 @@
     };
 
     qs('#b-syncsave').onclick = function () {
-      var url = val('#f-supaurl');
+      // 管理画面から /rest/v1/ 付きでコピーされることがあるので整えて保存する
+      var url = Sync.normalizeUrl(val('#f-supaurl'));
+      qs('#f-supaurl').value = url;
       var key = val('#f-supakey');
       var space = val('#f-space') || 'default';
       var on = val('#f-syncon') === '1';
@@ -850,6 +1001,25 @@
         qs('#sync-state').innerHTML = '<span style="color:var(--red)">接続できません：' + esc(e.message) + '</span>';
       });
     };
+
+    qs('#b-copysql').onclick = function () {
+      var text = SETUP_SQL;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function () { toast('SQLをコピーしました'); },
+          function () { selectSql(); });
+      } else {
+        selectSql();
+      }
+    };
+    function selectSql() {
+      var pre = qs('#sql-text');
+      var range = document.createRange();
+      range.selectNodeContents(pre);
+      var sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      toast('SQLを選択しました。コピーしてください');
+    }
 
     qs('#b-syncnow').onclick = function () {
       if (!Sync.isActive()) { toast('先に接続設定を保存してください'); return; }

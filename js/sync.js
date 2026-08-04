@@ -31,11 +31,28 @@
     pending: 0
   };
 
+  /**
+   * 入力されたURLを「https://xxxx.supabase.co」の形にそろえる。
+   * 管理画面からコピーすると末尾に /rest/v1/ が付いていることがあり、
+   * そのままだとパスが二重になって接続できないため、パス以降は落とす。
+   */
+  function normalizeUrl(raw) {
+    var u = String(raw || '').trim();
+    if (!u) return '';
+    if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+    try {
+      var parsed = new URL(u);
+      return parsed.protocol + '//' + parsed.host;
+    } catch (e) {
+      return u.replace(/\/rest\/v1\/?$/i, '').replace(/\/+$/, '');
+    }
+  }
+
   function config() {
     var s = Store.getSettings();
     return {
-      url: (s.supabaseUrl || '').replace(/\/+$/, ''),
-      key: s.supabaseAnonKey || '',
+      url: normalizeUrl(s.supabaseUrl),
+      key: (s.supabaseAnonKey || '').trim(),
       space: s.space || 'default',
       enabled: s.syncEnabled !== false
     };
@@ -75,11 +92,36 @@
     });
   }
 
-  function describeError(e, res) {
-    if (res && res.status === 404) return 'テーブルが見つかりません（juki_records を作成してください）';
-    if (res && (res.status === 401 || res.status === 403)) return 'キーまたは権限の設定を確認してください';
-    if (res && res.status) return 'サーバーエラー（' + res.status + '）';
-    return 'ネットワークに接続できません';
+  /** エラー応答を、対処が分かる日本語にして返す */
+  function describeError(res, body) {
+    var code = '', message = '';
+    try {
+      var j = JSON.parse(body);
+      code = j.code || '';
+      message = j.message || '';
+    } catch (e) {
+      message = (body || '').slice(0, 120);
+    }
+    if (code === 'PGRST205' || code === '42P01' || /schema cache/i.test(message)) {
+      return 'テーブル juki_records がまだありません。Supabase の SQL Editor で README のSQLを実行してください。';
+    }
+    if (code === 'PGRST125' || /Invalid path/i.test(message)) {
+      return 'URLの形式が正しくありません。Project URL（https://〇〇.supabase.co）だけを入力してください。';
+    }
+    if (code === '42501' || /permission denied|row-level security/i.test(message)) {
+      return 'アクセスが許可されていません。README のSQLのうち、ポリシー（create policy）の部分が実行されているか確認してください。';
+    }
+    if (res && (res.status === 401 || res.status === 403)) {
+      return 'キーが正しくありません。Supabase の anon public（または publishable）キーを確認してください。';
+    }
+    if (res && res.status) {
+      return 'サーバーエラー（' + res.status + '）' + (message ? '：' + message : '');
+    }
+    return 'ネットワークに接続できません。電波の状態をご確認ください。';
+  }
+
+  function failWith(r) {
+    return r.text().then(function (t) { throw new Error(describeError(r, t)); });
   }
 
   /* ---------------- サーバーから取得 ---------------- */
@@ -89,11 +131,9 @@
       '&space=eq.' + encodeURIComponent(c.space) +
       '&updated_at=gt.' + encodeURIComponent(cursor()) +
       '&order=updated_at.asc&limit=2000';
-    var res;
     return fetch(url, { headers: headers(c) })
       .then(function (r) {
-        res = r;
-        if (!r.ok) return r.text().then(function (t) { throw new Error(describeError(null, r) + (t ? '：' + t.slice(0, 120) : '')); });
+        if (!r.ok) return failWith(r);
         return r.json();
       })
       .then(function (rows) {
@@ -113,7 +153,12 @@
         return changed;
       })
       .catch(function (e) {
-        throw new Error(e.message || describeError(e, res));
+        // 通信自体に失敗した場合（圏外など）は分かりやすい文言に置き換える
+        var m = (e && e.message) || '';
+        if (!m || /Failed to fetch|NetworkError|Load failed/i.test(m)) {
+          throw new Error(describeError(null, ''));
+        }
+        throw e;
       });
   }
 
@@ -141,11 +186,7 @@
       headers: headers(c, { Prefer: 'resolution=merge-duplicates,return=minimal' }),
       body: JSON.stringify(rows)
     }).then(function (r) {
-      if (!r.ok) {
-        return r.text().then(function (t) {
-          throw new Error(describeError(null, r) + (t ? '：' + t.slice(0, 120) : ''));
-        });
-      }
+      if (!r.ok) return failWith(r);
       Store.markSynced(rows.map(function (x) { return x.id; }));
       return rows.length;
     });
@@ -215,17 +256,15 @@
 
   /** 接続テスト。設定画面から使う */
   function test(url, key, space) {
-    var c = { url: (url || '').replace(/\/+$/, ''), key: key, space: space || 'default' };
+    var c = { url: normalizeUrl(url), key: (key || '').trim(), space: space || 'default' };
     if (!c.url || !c.key) return Promise.reject(new Error('URLとキーの両方を入力してください'));
     return fetch(c.url + '/rest/v1/' + TABLE + '?select=id&limit=1&space=eq.' + encodeURIComponent(c.space), {
       headers: headers(c)
     }).then(function (r) {
-      if (!r.ok) {
-        return r.text().then(function (t) {
-          throw new Error(describeError(null, r) + (t ? '：' + t.slice(0, 160) : ''));
-        });
-      }
+      if (!r.ok) return failWith(r);
       return true;
+    }, function () {
+      throw new Error(describeError(null, ''));
     });
   }
 
@@ -248,6 +287,7 @@
     },
     isActive: isActive,
     isConfigured: isConfigured,
+    normalizeUrl: normalizeUrl,
     test: test
   };
 })(window);
