@@ -131,12 +131,69 @@
     return '<a class="back-link" href="' + href + '">‹ ' + esc(label) + '</a>';
   }
 
-  function crumbs(items) {
-    return '<div class="breadcrumb">' + items.map(function (it, i) {
-      var text = esc(it.text);
-      var link = it.href ? '<a href="' + it.href + '">' + text + '</a>' : text;
-      return (i ? ' &rsaquo; ' : '') + link;
-    }).join('') + '</div>';
+  /** 見出し（英字キッカー＋和文タイトル） */
+  function pageHead(kicker, title) {
+    return '<div class="page-head"><span class="kicker">' + esc(kicker) + '</span>' +
+      '<h1>' + esc(title) + '</h1></div>';
+  }
+
+  /** レジストレーションマーク付きの枠 */
+  function corners() {
+    return '<i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>';
+  }
+
+  /**
+   * 一覧の1行。左に数値ブロック、右に本文とタグ。
+   * sub と tags はHTMLを組み立て済みで渡す（呼び出し側でエスケープすること）。
+   */
+  function rowLink(href, o) {
+    var html = '<a class="row-link" href="' + href + '">';
+    if (o.count !== undefined && o.count !== null) {
+      html += '<span class="count ' + (o.countClass || '') + '">' +
+        '<span class="n">' + esc(o.count) + '</span>' +
+        (o.unit ? '<span class="unit">' + esc(o.unit) + '</span>' : '') +
+        '</span>';
+    }
+    html += '<span class="body"><span class="main">' + esc(o.main) + '</span>';
+    if (o.sub) html += '<span class="sub">' + o.sub + '</span>';
+    if (o.tags && o.tags.length) {
+      html += '<span class="tags">' + o.tags.map(function (t) {
+        return '<span class="tag ' + (t.cls || 'none') + '">' + esc(t.text) + '</span>';
+      }).join('') + '</span>';
+    }
+    html += '</span><span class="arrow">\u203a</span></a>';
+    return html;
+  }
+
+  /**
+   * 当日の点検状況。siteId を省略すると全現場の合計。
+   * done = その日に作業開始前点検を記録済みの台数、ng = 要整備が出た台数。
+   */
+  function todayStatus(siteId) {
+    var today = todayStr();
+    var machines = Store.listMachines(siteId);
+    var recs = Store.listInspections({ siteId: siteId, from: today, to: today });
+    var byMachine = {};
+    recs.forEach(function (r) {
+      (byMachine[r.machineId] = byMachine[r.machineId] || []).push(r);
+    });
+    var done = 0, ng = 0;
+    machines.forEach(function (m) {
+      var list = byMachine[m.id] || [];
+      var hasPre = list.some(function (r) { return r.phase === 'pre'; });
+      if (hasPre) done++;
+      if (list.some(function (r) { return r.judgement === 'ng'; })) ng++;
+    });
+    return { total: machines.length, done: done, ng: ng, pending: machines.length - done };
+  }
+
+  /** 当日の状況から一覧行のタグを作る */
+  function statusTags(st) {
+    var tags = [];
+    if (st.ng) tags.push({ cls: 'ng', text: '要整備 ' + st.ng });
+    if (st.total && st.pending === 0) tags.push({ cls: 'done', text: '本日完了' });
+    else if (st.pending) tags.push({ cls: 'none', text: '未点検 ' + st.pending });
+    return tags;
   }
 
   /* ------------------------------------------------------------------ *
@@ -144,38 +201,57 @@
    * ------------------------------------------------------------------ */
   function renderHome() {
     var sites = Store.listSites();
-    var html = '<h1>工事現場一覧</h1>';
+    var st = todayStatus();
+    var html = pageHead('SITES', '工事現場一覧');
 
     if (!sites.length) {
       html +=
-        '<div class="card">' +
+        '<div class="card blueprint">' + corners() +
         '<p><strong>はじめに</strong></p>' +
-        '<p>①工事現場を登録　→　②その現場の重機を登録　→　③重機のQRコードを印刷して機体に貼付　→　④現場ではQRを読むだけで点検できます。</p>' +
+        '<p>\u2460工事現場を登録　\u2192　\u2461その現場の重機を登録　\u2192　\u2462重機のQRコードを印刷して機体に貼付　\u2192　\u2463現場ではQRを読むだけで点検できます。</p>' +
         '<p class="muted">記録はいつでもPDF（印刷）で出力できます。' +
         (Sync.isActive()
           ? '記録は他の端末とも自動で共有されます。'
           : '（いまは<a href="#/settings">この端末だけ</a>に保存されます）') + '</p>' +
         '</div>';
+    } else if (st.total) {
+      // 現場を開く前に「本日あと何台か」が分かるようにする
+      html +=
+        '<div class="stat blueprint">' + corners() +
+        '<div class="figure">' + st.done + '<span class="of">/' + st.total + '</span></div>' +
+        '<div class="note">本日 ' + esc(formatDate(todayStr())) + 'の作業開始前点検<br>' +
+        (st.ng ? '<span class="ng">要整備 ' + st.ng + ' 台</span>／' : '') +
+        (st.pending ? '未点検 ' + st.pending + ' 台' : '全台完了') +
+        '</div></div>';
     }
 
     html += '<ul class="list">';
-    sites.forEach(function (s) {
-      var machines = Store.listMachines(s.id);
-      var recs = Store.listInspections({ siteId: s.id });
+    sites.forEach(function (s2) {
+      var machines = Store.listMachines(s2.id);
+      var recs = Store.listInspections({ siteId: s2.id });
       var last = recs.length ? recs[recs.length - 1] : null;
-      html +=
-        '<li><a class="row-link" href="#/site/' + encodeURIComponent(s.id) + '">' +
-        '<span><span class="main">' + esc(s.name) + '</span><br>' +
-        '<span class="sub">重機 ' + machines.length + ' 台 ／ 点検記録 ' + recs.length + ' 件' +
-        (last ? '　最終点検 ' + esc(formatDate(last.date)) : '') + '</span></span>' +
-        '<span class="arrow">›</span></a></li>';
+      var sst = todayStatus(s2.id);
+      var sub = [];
+      if (s2.contractNo) sub.push(esc(s2.contractNo));
+      sub.push(last ? '最終点検 ' + esc(formatDate(last.date)) : '点検記録なし');
+      html += '<li>' + rowLink('#/site/' + encodeURIComponent(s2.id), {
+        count: machines.length, unit: '台',
+        countClass: !machines.length ? 'idle' : (sst.pending === 0 ? 'done' : ''),
+        main: s2.name,
+        sub: sub.join(' ／ '),
+        tags: statusTags(sst)
+      }) + '</li>';
     });
     html += '</ul>';
 
     html +=
       '<div class="btn-row">' +
-      '<a class="btn" href="#/site/new">＋ 工事現場を登録</a>' +
-      '</div>';
+      '<a class="btn lead" href="#/scan">■ QRを読み取って点検</a>' +
+      '</div>' +
+      '<div class="btn-row">' +
+      '<a class="btn secondary" href="#/site/new">＋ 工事現場を登録</a>' +
+      '</div>' +
+      '<p class="muted">スマートフォン標準のカメラで読み取っても、同じ点検画面が開きます。</p>';
 
     app.innerHTML = html;
   }
@@ -187,8 +263,8 @@
     var isNew = !site;
     site = site || { name: '', contractNo: '', client: '', periodFrom: '', periodTo: '', manager: '' };
     app.innerHTML =
-      crumbs([{ text: '現場一覧', href: '#/' }, { text: isNew ? '現場の登録' : '現場の編集' }]) +
-      '<h1>' + (isNew ? '工事現場の登録' : '工事現場の編集') + '</h1>' +
+      backLink(isNew ? '#/' : '#/site/' + encodeURIComponent(site.id), isNew ? '現場一覧へ戻る' : '現場へ戻る') +
+      pageHead('SITE', isNew ? '工事現場の登録' : '工事現場の編集') +
       '<div class="card">' +
       field('工事番号', '<input type="text" id="f-contractno" value="' + esc(site.contractNo || '') + '" placeholder="例：R8-道改-1234">') +
       field('工事名（現場名）', '<input type="text" id="f-name" value="' + esc(site.name) + '" placeholder="例：○○川災害復旧工事">', true) +
@@ -247,8 +323,9 @@
    * ------------------------------------------------------------------ */
   function renderSite(site) {
     var machines = Store.listMachines(site.id);
+    var st = todayStatus(site.id);
     var html = backLink('#/', '現場一覧へ戻る');
-    html += '<h1>' + esc(site.name) + '</h1>';
+    html += pageHead('SITE', site.name);
 
     var meta = [];
     if (site.contractNo) meta.push('工事番号：' + site.contractNo);
@@ -259,23 +336,44 @@
     if (site.engineer) meta.push('主任技術者：' + site.engineer);
     if (meta.length) html += '<p class="muted">' + esc(meta.join('　／　')) + '</p>';
 
-    html += '<h2>登録重機（' + machines.length + '台）</h2>';
+    if (machines.length) {
+      html +=
+        '<div class="stat blueprint">' + corners() +
+        '<div class="figure">' + st.done + '<span class="of">/' + st.total + '</span></div>' +
+        '<div class="note">本日 ' + esc(formatDate(todayStr())) + 'の作業開始前点検<br>' +
+        (st.ng ? '<span class="ng">要整備 ' + st.ng + ' 台</span>／' : '') +
+        (st.pending ? '未点検 ' + st.pending + ' 台' : '全台完了') +
+        '</div></div>';
+    }
+
+    html += '<h2><span class="kicker">MACHINES</span>登録重機（' + machines.length + '台）</h2>';
     if (!machines.length) {
       html += '<div class="card"><p>まだ重機が登録されていません。</p></div>';
     }
     html += '<ul class="list">';
-    machines.forEach(function (m) {
+    var today = todayStr();
+    machines.forEach(function (m, i) {
       var recs = Store.listInspections({ machineId: m.id });
       var last = recs.length ? recs[recs.length - 1] : null;
-      html +=
-        '<li><a class="row-link" href="#/machine/' + encodeURIComponent(m.id) + '">' +
-        '<span><span class="main">' + esc(m.name) + '</span><br>' +
-        '<span class="sub">' + esc(D.machineTypeName(m.type)) +
-        (m.serial ? '　機番 ' + esc(m.serial) : '') + '<br>' +
-        (last ? '最終点検 ' + esc(formatDate(last.date)) + '（' + esc(D.phaseName(last.phase)) + '・' +
-          (last.judgement === 'ng' ? '<span class="badge ng">要整備</span>' : '<span class="badge ok">良</span>') + '）'
-          : '<span class="badge none">点検記録なし</span>') +
-        '</span></span><span class="arrow">›</span></a></li>';
+      var todays = recs.filter(function (r) { return r.date === today; });
+      var donePre = todays.some(function (r) { return r.phase === 'pre'; });
+      var hasNg = todays.some(function (r) { return r.judgement === 'ng'; });
+      var sub = [esc(D.machineTypeName(m.type))];
+      if (m.serial) sub.push('機番 ' + esc(m.serial));
+      var line2 = last
+        ? '最終点検 ' + esc(formatDate(last.date)) + '（' + esc(D.phaseName(last.phase)) + '）'
+        : '点検記録なし';
+      var tags = [];
+      if (hasNg) tags.push({ cls: 'ng', text: '要整備' });
+      if (donePre) tags.push({ cls: 'done', text: '本日点検済' });
+      else tags.push({ cls: 'none', text: '本日未点検' });
+      html += '<li>' + rowLink('#/machine/' + encodeURIComponent(m.id), {
+        count: i + 1, unit: 'NO.',
+        countClass: donePre ? 'done' : (hasNg ? '' : 'idle'),
+        main: m.name,
+        sub: sub.join(' ／ ') + '<br>' + line2,
+        tags: tags
+      }) + '</li>';
     });
     html += '</ul>';
 
@@ -316,9 +414,9 @@
     }).join('');
 
     app.innerHTML =
-      crumbs([{ text: '現場一覧', href: '#/' }, { text: site.name, href: '#/site/' + encodeURIComponent(site.id) },
-        { text: isNew ? '重機の登録' : '重機の編集' }]) +
-      '<h1>' + (isNew ? '重機の登録' : '重機の編集') + '</h1>' +
+      backLink(isNew ? '#/site/' + encodeURIComponent(site.id) : '#/machine/' + encodeURIComponent(machine.id),
+        isNew ? '現場へ戻る' : '重機へ戻る') +
+      pageHead('MACHINE', isNew ? '重機の登録' : '重機の編集') +
       '<div class="card">' +
       field('重機の呼び名', '<input type="text" id="f-name" value="' + esc(machine.name) + '" placeholder="例：バックホウ0.45m3 ①">', true) +
       field('機種', '<select id="f-type">' + typeOptions + '</select>', true) +
@@ -370,24 +468,24 @@
     var url = Store.machineUrl(machine, site);
     var recs = Store.listInspections({ machineId: machine.id }).reverse();
 
-    var html = crumbs([{ text: '現場一覧', href: '#/' },
-      { text: site.name, href: '#/site/' + encodeURIComponent(site.id) }, { text: machine.name }]);
-
-    html += '<h1>' + esc(machine.name) + '</h1>';
+    var html = backLink('#/site/' + encodeURIComponent(site.id), '現場へ戻る');
+    html += pageHead('MACHINE', machine.name);
     var meta = [D.machineTypeName(machine.type)];
-    if (machine.maker || machine.model) meta.push((machine.maker || '') + ' ' + (machine.model || ''));
+    if (machine.maker || machine.model) meta.push(((machine.maker || '') + ' ' + (machine.model || '')).trim());
     if (machine.serial) meta.push('機番 ' + machine.serial);
-    html += '<p class="muted">' + esc(meta.join('　／　')) + '</p>';
+    html += '<div class="card blueprint">' + corners() +
+      '<div style="font-size:12.5px;line-height:1.7">' + esc(site.name) + '<br>' +
+      esc(meta.join('　／　')) + '</div></div>';
 
     html +=
       '<div class="btn-row">' +
-      '<a class="btn" href="#/inspect/' + encodeURIComponent(machine.id) + '?phase=pre">作業開始前点検を行う</a>' +
+      '<a class="btn lead" href="#/inspect/' + encodeURIComponent(machine.id) + '?phase=pre">作業開始前点検を行う</a>' +
       '</div>' +
       '<div class="btn-row">' +
       '<a class="btn secondary" href="#/inspect/' + encodeURIComponent(machine.id) + '?phase=post">作業終了時点検を行う</a>' +
       '</div>';
 
-    html += '<h2>この重機のQRコード</h2>' +
+    html += '<h2><span class="kicker">QR</span>この重機のQRコード</h2>' +
       '<div class="card qr-box">' +
       '<div id="qr"></div>' +
       '<div class="qr-url">' + esc(url) + '</div>' +
@@ -396,17 +494,19 @@
       '<a class="btn secondary" href="#/print/labels?machine=' + encodeURIComponent(machine.id) + '">QRラベルを印刷</a>' +
       '</div>';
 
-    html += '<h2>点検記録（' + recs.length + '件）</h2>';
+    html += '<h2><span class="kicker">RECORDS</span>点検記録（' + recs.length + '件）</h2>';
     if (!recs.length) {
       html += '<div class="card"><p>まだ点検記録がありません。</p></div>';
     } else {
       html += '<ul class="list">';
       recs.slice(0, 10).forEach(function (r) {
-        html += '<li><a class="row-link" href="#/record/' + encodeURIComponent(r.id) + '">' +
-          '<span><span class="main">' + esc(formatDate(r.date)) + ' ' + esc(r.time || '') + '</span><br>' +
-          '<span class="sub">' + esc(D.phaseName(r.phase)) + '　点検者：' + esc(r.inspector || '－') + '</span></span>' +
-          (r.judgement === 'ng' ? '<span class="badge ng">要整備</span>' : '<span class="badge ok">良</span>') +
-          '</a></li>';
+        html += '<li>' + rowLink('#/record/' + encodeURIComponent(r.id), {
+          count: (r.date || '').slice(8), unit: (Number((r.date || '').slice(5, 7)) || '') + '月',
+          countClass: r.judgement === 'ng' ? '' : 'done',
+          main: formatDate(r.date) + ' ' + (r.time || ''),
+          sub: esc(D.phaseName(r.phase)) + '　点検者：' + esc(r.inspector || '－'),
+          tags: [r.judgement === 'ng' ? { cls: 'ng', text: '要整備' } : { cls: 'ok', text: '良' }]
+        }) + '</li>';
       });
       html += '</ul>';
       html += '<div class="btn-row">' +
@@ -437,15 +537,26 @@
     if (!site) return renderNotFound('現場が見つかりません。');
     var sections = D.sectionsFor(phase, machine.type);
 
-    var html = crumbs([{ text: '現場一覧', href: '#/' },
-      { text: site.name, href: '#/site/' + encodeURIComponent(site.id) },
-      { text: machine.name, href: '#/machine/' + encodeURIComponent(machine.id) },
-      { text: D.phaseName(phase) }]);
+    var html = backLink('#/machine/' + encodeURIComponent(machine.id), '重機へ戻る');
 
-    html += '<h1>' + esc(D.phaseName(phase)) + '</h1>' +
-      '<div class="card tight">' +
-      '<div><strong>' + esc(machine.name) + '</strong>（' + esc(D.machineTypeName(machine.type)) + '）</div>' +
-      '<div class="muted">' + esc(site.name) + (machine.serial ? '　機番 ' + esc(machine.serial) : '') + '</div>' +
+    html += pageHead(phase === 'post' ? 'AFTER WORK' : 'BEFORE WORK', D.phaseName(phase)) +
+      '<div class="insp-head">' +
+      '<div class="m-name">' + esc(machine.name) + '</div>' +
+      '<div class="m-sub">' + esc(D.machineTypeName(machine.type)) +
+      (machine.serial ? '／機番 ' + esc(machine.serial) : '') + '</div>' +
+      '<div class="m-sub">' + esc(site.name) + '</div>' +
+      '</div>';
+
+    // 残り件数を常に見せるための進捗表示（スクロールしても画面上部に残る）
+    var totalItems = sections.reduce(function (n, sec) { return n + sec.items.length; }, 0);
+    html +=
+      '<div class="progress-bar">' +
+      '<div class="figure"><span id="p-done">0</span><span class="of">/' + totalItems + '</span></div>' +
+      '<div class="meter">' +
+      '<div class="track"><div class="fill" id="p-fill"></div></div>' +
+      '<div class="left" id="p-left">残り ' + totalItems + ' 項目</div>' +
+      '</div>' +
+      '<button class="btn secondary small" id="b-allok" style="flex:none">全て良</button>' +
       '</div>';
 
     html += '<div class="card">' +
@@ -457,15 +568,21 @@
       field('アワーメータ（h）', '<input type="number" id="f-hour" inputmode="decimal" step="0.1" placeholder="任意">') +
       '</div>';
 
-    sections.forEach(function (sec) {
-      html += '<h2>' + esc(sec.title) + '</h2>';
+    var itemNo = 0;
+    sections.forEach(function (sec, si) {
+      var secNo = String.fromCharCode(65 + si); // A, B, C …
+      html += '<h2><span class="kicker">' + secNo + '</span>' + esc(sec.title) + '</h2>';
       if (sec.note) html += '<p class="section-note">' + esc(sec.note) + '</p>';
       html += '<div class="card">';
       sec.items.forEach(function (it) {
+        itemNo++;
         html +=
           '<div class="check-item" data-item="' + esc(it.id) + '">' +
+          '<div class="head">' +
+          '<span class="no">' + itemNo + '</span>' +
           '<div class="label">' + esc(it.label) +
-          (it.hint ? '<br><span class="hint">※' + esc(it.hint) + '</span>' : '') + '</div>' +
+          (it.hint ? '<span class="hint">※' + esc(it.hint) + '</span>' : '') + '</div>' +
+          '</div>' +
           '<div class="choices">' +
           choice(it.id, 'ok', '良', 'c-ok') +
           choice(it.id, 'ng', '否', 'c-ng') +
@@ -475,7 +592,7 @@
       html += '</div>';
     });
 
-    html += '<h2>備考・処置</h2>' +
+    html += '<h2><span class="kicker">NOTES</span>備考・処置</h2>' +
       '<div class="card">' +
       field('不具合の内容', '<textarea id="f-ngnote" placeholder="「否」があった場合に記入"></textarea>') +
       field('処置・連絡事項', '<textarea id="f-action" placeholder="例：○○を補給した／整備会社へ連絡"></textarea>') +
@@ -483,18 +600,48 @@
 
     html +=
       '<div class="sticky-actions">' +
-      '<button class="btn block" id="b-save">点検を記録する</button>' +
+      '<button class="btn submit wait" id="b-save">未選択 ' + totalItems + ' 項目</button>' +
       '</div>' +
-      '<div class="btn-row"><button class="btn plain" id="b-allok">すべて「良」にする</button></div>' +
-      '<p class="muted">※「すべて良」は入力補助です。必ず現物を確認してください。</p>';
+      '<p class="muted">※「全て良」は入力補助です。必ず現物を確認してください。</p>';
 
     app.innerHTML = html;
+
+    /* 選択のたびに、進捗と記録ボタンの状態を描き直す */
+    function refreshProgress() {
+      var itemEls = app.querySelectorAll('.check-item');
+      var done = 0, ng = 0;
+      for (var i = 0; i < itemEls.length; i++) {
+        var sel = itemEls[i].querySelector('input[type="radio"]:checked');
+        if (!sel) continue;
+        done++;
+        if (sel.value === 'ng') ng++;
+      }
+      var total = itemEls.length;
+      qs('#p-done').textContent = done;
+      qs('#p-fill').style.width = (total ? Math.round((done / total) * 100) : 0) + '%';
+      qs('#p-left').innerHTML = done < total
+        ? '残り ' + (total - done) + ' 項目' + (ng ? '　／　<span class="ng">否 ' + ng + ' 件</span>' : '')
+        : (ng ? '<span class="ng">否 ' + ng + ' 件</span>' : 'すべて選択済み');
+
+      var btn = qs('#b-save');
+      btn.className = 'btn submit' + (done < total ? ' wait' : (ng ? ' ng' : ''));
+      btn.textContent = done < total
+        ? '未選択 ' + (total - done) + ' 項目'
+        : (ng ? '要整備として記録する（否 ' + ng + '）' : '点検を記録する');
+    }
+
+    app.addEventListener('change', function (ev) {
+      if (ev.target && ev.target.type === 'radio') refreshProgress();
+    });
 
     qs('#b-allok').onclick = function () {
       var boxes = app.querySelectorAll('input[type="radio"][value="ok"]');
       for (var i = 0; i < boxes.length; i++) boxes[i].checked = true;
+      refreshProgress();
       toast('すべて「良」を選択しました');
     };
+
+    refreshProgress();
 
     qs('#b-save').onclick = function () {
       var date = val('#f-date');
@@ -513,7 +660,8 @@
       }
       if (missing) {
         missing.scrollIntoView({ block: 'center' });
-        missing.style.background = '#fff8e1';
+        missing.style.outline = '2px solid var(--red)';
+        missing.style.outlineOffset = '2px';
         toast('未選択の項目があります');
         return;
       }
@@ -557,12 +705,8 @@
    * 点検記録の詳細
    * ------------------------------------------------------------------ */
   function renderRecord(rec) {
-    var html = crumbs([{ text: '現場一覧', href: '#/' },
-      { text: rec.siteName || '現場', href: '#/site/' + encodeURIComponent(rec.siteId) },
-      { text: rec.machineName || '重機', href: '#/machine/' + encodeURIComponent(rec.machineId) },
-      { text: '点検記録' }]);
-
-    html += '<h1>点検記録</h1>';
+    var html = backLink('#/machine/' + encodeURIComponent(rec.machineId), '重機へ戻る');
+    html += pageHead('RECORD', formatDate(rec.date) + ' ' + (rec.time || ''));
     if (rec.judgement === 'ng') {
       html += '<div class="alert error"><strong>要整備の項目があります。</strong>整備・処置が済むまで使用しないでください。</div>';
     } else {
@@ -594,7 +738,7 @@
    * ------------------------------------------------------------------ */
   function approvalFormHtml(rec) {
     var site = Store.getSite(rec.siteId);
-    var html = '<h2>確認</h2>' +
+    var html = '<h2><span class="kicker">APPROVAL</span>確認</h2>' +
       '<p class="section-note">点検内容を確認した方が入力してください。' +
       '印刷した用紙に押印する場合は、空欄のままで構いません。</p>' +
       '<div class="card">';
@@ -773,11 +917,10 @@
       return '<option value="' + esc(m.id) + '"' + (m.id === machineId ? ' selected' : '') + '>' + esc(m.name) + '</option>';
     }).join('');
 
-    var html = crumbs([{ text: '現場一覧', href: '#/' }]
-      .concat(site ? [{ text: site.name, href: '#/site/' + encodeURIComponent(site.id) }] : [])
-      .concat([{ text: '点検記録' }]));
+    var html = backLink(site ? '#/site/' + encodeURIComponent(site.id) : '#/',
+      site ? '現場へ戻る' : '現場一覧へ戻る');
 
-    html += '<h1>点検記録' + (site ? '（' + esc(site.name) + '）' : '') + '</h1>';
+    html += pageHead('RECORDS', '点検記録' + (site ? '／' + site.name : ''));
 
     html += '<div class="card">' +
       field('重機', '<select id="f-machine">' + machineOptions + '</select>') +
@@ -794,11 +937,14 @@
       html += '<div class="btn-row"><a class="btn" id="b-print">この一覧をまとめて印刷／PDF保存</a></div>';
       html += '<ul class="list">';
       recs.forEach(function (r) {
-        html += '<li><a class="row-link" href="#/record/' + encodeURIComponent(r.id) + '">' +
-          '<span><span class="main">' + esc(formatDate(r.date)) + ' ' + esc(r.time || '') + '　' + esc(r.machineName) + '</span><br>' +
-          '<span class="sub">' + esc(D.phaseName(r.phase)) + '　点検者：' + esc(r.inspector || '－') + '</span></span>' +
-          (r.judgement === 'ng' ? '<span class="badge ng">要整備</span>' : '<span class="badge ok">良</span>') +
-          '</a></li>';
+        html += '<li>' + rowLink('#/record/' + encodeURIComponent(r.id), {
+          count: (r.date || '').slice(8), unit: (Number((r.date || '').slice(5, 7)) || '') + '月',
+          countClass: r.judgement === 'ng' ? '' : 'done',
+          main: r.machineName,
+          sub: esc(formatDate(r.date)) + ' ' + esc(r.time || '') + '<br>' +
+            esc(D.phaseName(r.phase)) + '　点検者：' + esc(r.inspector || '－'),
+          tags: [r.judgement === 'ng' ? { cls: 'ng', text: '要整備' } : { cls: 'ok', text: '良' }]
+        }) + '</li>';
       });
       html += '</ul>';
     } else {
@@ -852,8 +998,8 @@
         '<a href="#/settings">設定</a>で公開URLを登録してください。</div>';
     }
 
-    var html = crumbs([{ text: '現場一覧', href: '#/' }, { text: title }, { text: 'QRラベル印刷' }]) +
-      '<h1 class="no-print">QRラベルの印刷</h1>' + warn +
+    var html = '<div class="no-print">' + backLink('#/', '現場一覧へ戻る') + '</div>' +
+      pageHead('QR LABELS', 'QRラベルの印刷').replace('page-head', 'page-head no-print') + warn +
       '<div class="btn-row no-print">' +
       '<button class="btn" id="b-print">印刷する（PDF保存も可）</button>' +
       '<button class="btn plain" id="b-back">戻る</button>' +
@@ -906,7 +1052,7 @@
     if (!recs.length) return renderNotFound('該当する点検記録がありません。');
 
     var html =
-      '<h1 class="no-print">点検記録の印刷</h1>' +
+      pageHead('PRINT', '点検記録の印刷').replace('page-head', 'page-head no-print') +
       '<div class="btn-row no-print">' +
       '<button class="btn" id="b-print">印刷する（PDF保存も可）</button>' +
       '<button class="btn plain" id="b-back">戻る</button>' +
@@ -933,10 +1079,10 @@
     var st = Sync.status();
 
     app.innerHTML =
-      crumbs([{ text: '現場一覧', href: '#/' }, { text: '設定' }]) +
-      '<h1>設定・バックアップ</h1>' +
+      backLink('#/', '現場一覧へ戻る') +
+      pageHead('SETTINGS', '設定・バックアップ') +
 
-      '<h2>端末間の自動共有</h2>' +
+      '<h2><span class="kicker">SYNC</span>端末間の自動共有</h2>' +
       '<div class="card">' +
       '<p id="sync-state">' + syncStateText(st) + '</p>' +
       field('Supabase の Project URL', '<input type="url" id="f-supaurl" value="' + esc(s.supabaseUrl) + '" placeholder="https://xxxxxxxx.supabase.co">') +
@@ -959,7 +1105,7 @@
       '<pre id="sql-text">' + esc(SETUP_SQL) + '</pre></details>' +
       '</div>' +
 
-      '<h2>QRコードに埋め込むURL</h2>' +
+      '<h2><span class="kicker">URL</span>QRコードに埋め込むURL</h2>' +
       '<div class="card">' +
       '<p class="muted">スマートフォンでQRを読み取ったときに開くアドレスです。社内サーバーや共有フォルダ、' +
       'GitHub Pages などにこのアプリ一式を置き、そのURLを入れてください。</p>' +
@@ -969,7 +1115,7 @@
       '<div class="btn-row"><button class="btn" id="b-save">設定を保存</button></div>' +
       '</div>' +
 
-      '<h2>データのバックアップ</h2>' +
+      '<h2><span class="kicker">BACKUP</span>データのバックアップ</h2>' +
       '<div class="card">' +
       '<p>現在の保存件数：現場 ' + counts.sites + ' 件／重機 ' + counts.machines + ' 台／点検記録 ' + counts.inspections + ' 件</p>' +
       '<p class="muted">自動共有を設定していない場合や、控えを手元に残したい場合に使います。' +
@@ -982,7 +1128,7 @@
       '<p class="muted">読み込みは「追加（マージ）」です。同じ記録は重複しません。</p>' +
       '</div>' +
 
-      '<h2>このアプリについて</h2>' +
+      '<h2><span class="kicker">ABOUT</span>このアプリについて</h2>' +
       '<div class="card">' +
       '<p class="muted">点検項目は、厚生労働省「外国人労働者に対する安全衛生教育教材作成事業（建設業）／' +
       'トンネル推進工業務、建設機械施工業務及び土工業務　安全衛生のポイント　建設機械の基本と点検等」(2020.3) ' +
@@ -1092,6 +1238,200 @@
   }
 
   /* ------------------------------------------------------------------ *
+   * QRの読み取り（カメラ）
+   * ------------------------------------------------------------------ */
+  var scan = null;   // 起動中の読み取り状態。画面を離れるとき必ず止める
+
+  function stopScan() {
+    if (!scan) return;
+    clearTimeout(scan.timer);
+    if (scan.stream) {
+      var tracks = scan.stream.getTracks();
+      for (var i = 0; i < tracks.length; i++) tracks[i].stop();
+    }
+    scan = null;
+  }
+
+  function scanStatus(msg, cls) {
+    var el = document.getElementById('scan-status');
+    if (el) {
+      el.className = 'scan-status' + (cls ? ' ' + cls : '');
+      el.innerHTML = msg;
+    }
+  }
+
+  function renderScan() {
+    var html = backLink('#/', '現場一覧へ戻る') +
+      pageHead('SCAN', 'QRを読み取る') +
+      '<div class="scan-frame">' +
+      '<video id="scan-video" playsinline muted autoplay></video>' +
+      '<div class="scan-guide"><i></i><i></i><i></i><i></i></div>' +
+      '</div>' +
+      '<p id="scan-status" class="scan-status">カメラを準備しています…</p>' +
+      '<div class="btn-row" id="scan-actions"></div>' +
+      '<p class="muted">重機に貼ったQRコードを枠の中に入れてください。読み取れると自動で点検画面に進みます。' +
+      '暗い場所ではライトを点けてください。</p>';
+    app.innerHTML = html;
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      return scanFailed('このブラウザではカメラを使えません。スマートフォン標準のカメラでQRを読み取ってください。');
+    }
+    if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.protocol !== 'file:') {
+      return scanFailed('カメラを使うには <strong>https</strong> で開く必要があります。公開URL（https://…）から開き直してください。');
+    }
+
+    scan = { stream: null, timer: null, detector: null, busy: false };
+
+    // 端末が対応していれば標準の読み取り機能を使う（速い）。無ければ自前で解析する。
+    try {
+      if (global_BarcodeDetector()) {
+        scan.detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+      }
+    } catch (e) { scan.detector = null; }
+
+    navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false
+    }).then(function (stream) {
+      if (!scan) {                       // 起動待ちの間に画面を離れた場合
+        var t = stream.getTracks();
+        for (var i = 0; i < t.length; i++) t[i].stop();
+        return;
+      }
+      scan.stream = stream;
+      var video = document.getElementById('scan-video');
+      if (!video) return;
+      video.srcObject = stream;
+      video.setAttribute('playsinline', '');
+      var playing = video.play();
+      if (playing && playing['catch']) playing['catch'](function () { /* 自動再生の失敗は無視 */ });
+      scanStatus('QRコードを枠の中に入れてください');
+      addTorchButton(stream);
+      scanTick();
+    })['catch'](function (err) {
+      var name = (err && err.name) || '';
+      if (name === 'NotAllowedError' || name === 'SecurityError') {
+        scanFailed('カメラの使用が許可されていません。ブラウザの設定でこのサイトのカメラを「許可」にしてから、もう一度お試しください。');
+      } else if (name === 'NotFoundError' || name === 'OverconstrainedError') {
+        scanFailed('カメラが見つかりませんでした。');
+      } else {
+        scanFailed('カメラを起動できませんでした。' + esc(name));
+      }
+    });
+  }
+
+  function global_BarcodeDetector() {
+    return typeof window.BarcodeDetector === 'function';
+  }
+
+  function scanFailed(msg) {
+    stopScan();
+    scanStatus(msg, 'error');
+    var box = document.getElementById('scan-actions');
+    if (box) {
+      box.innerHTML = '<button class="btn secondary" id="b-retry">もう一度試す</button>' +
+        '<a class="btn plain" href="#/">現場一覧へ戻る</a>';
+      var b = document.getElementById('b-retry');
+      if (b) b.onclick = function () { renderScan(); };
+    }
+  }
+
+  /** ライト（トーチ）に対応していればボタンを出す */
+  function addTorchButton(stream) {
+    var track = stream.getVideoTracks()[0];
+    if (!track || !track.getCapabilities) return;
+    var caps;
+    try { caps = track.getCapabilities(); } catch (e) { return; }
+    if (!caps || !caps.torch) return;
+    var box = document.getElementById('scan-actions');
+    if (!box) return;
+    var on = false;
+    box.innerHTML = '<button class="btn secondary" id="b-torch">ライトを点ける</button>';
+    document.getElementById('b-torch').onclick = function () {
+      on = !on;
+      track.applyConstraints({ advanced: [{ torch: on }] }).then(function () {
+        document.getElementById('b-torch').textContent = on ? 'ライトを消す' : 'ライトを点ける';
+      }, function () { toast('ライトを操作できませんでした'); });
+    };
+  }
+
+  /** 1コマ取り込んで読み取りを試す */
+  function scanTick() {
+    if (!scan) return;
+    var video = document.getElementById('scan-video');
+    if (!video || !scan.stream) return;
+
+    if (video.readyState < 2 || !video.videoWidth) {
+      scan.timer = setTimeout(scanTick, 120);
+      return;
+    }
+
+    if (!scan.canvas) {
+      scan.canvas = document.createElement('canvas');
+      scan.ctx = scan.canvas.getContext('2d', { willReadFrequently: true });
+    }
+    // 解析は長辺480pxまで縮小して行う（処理を軽くするため）
+    var scale = Math.min(1, 480 / Math.max(video.videoWidth, video.videoHeight));
+    var cw = Math.round(video.videoWidth * scale);
+    var ch = Math.round(video.videoHeight * scale);
+    if (scan.canvas.width !== cw) { scan.canvas.width = cw; scan.canvas.height = ch; }
+    scan.ctx.drawImage(video, 0, 0, cw, ch);
+
+    function next() {
+      if (scan) scan.timer = setTimeout(scanTick, 120);
+    }
+
+    if (scan.detector) {
+      scan.detector.detect(scan.canvas).then(function (codes) {
+        if (codes && codes.length && codes[0].rawValue) return scanFound(codes[0].rawValue);
+        next();
+      }, function () {
+        scan.detector = null;   // 使えない端末だったら自前の解析に切り替える
+        next();
+      });
+      return;
+    }
+
+    var text = null;
+    try {
+      var img = scan.ctx.getImageData(0, 0, cw, ch);
+      var res = QRDecode.decodeImageData(img);
+      if (res) text = res.text;
+    } catch (e) { /* 解析できないコマは飛ばす */ }
+    if (text) return scanFound(text);
+    next();
+  }
+
+  /** 読み取れたときの処理 */
+  function scanFound(text) {
+    stopScan();
+    if (navigator.vibrate) { try { navigator.vibrate(60); } catch (e) { /* 無視 */ } }
+
+    var idx = text.indexOf('#i=');
+    if (idx >= 0) {
+      var payload = text.slice(idx + 3);
+      var ok = false;
+      try {
+        var obj = JSON.parse(Store.b64urlDecode(payload));
+        ok = !!(obj && obj.m);
+      } catch (e) { ok = false; }
+      if (ok) {
+        scanStatus('読み取りました。点検画面を開きます…');
+        location.hash = '#i=' + payload;
+        return;
+      }
+    }
+    scanStatus('このQRコードは、マル点の重機ラベルではありません。<br>' +
+      '<span class="muted">読み取った内容：' + esc(text.slice(0, 120)) + '</span>', 'error');
+    var box = document.getElementById('scan-actions');
+    if (box) {
+      box.innerHTML = '<button class="btn secondary" id="b-retry">もう一度読み取る</button>' +
+        '<a class="btn plain" href="#/">現場一覧へ戻る</a>';
+      document.getElementById('b-retry').onclick = function () { renderScan(); };
+    }
+  }
+
+  /* ------------------------------------------------------------------ *
    * 同期の状態表示
    * ------------------------------------------------------------------ */
   function syncStateText(st) {
@@ -1154,7 +1494,7 @@
    * ------------------------------------------------------------------ */
   function renderNotFound(msg) {
     app.innerHTML =
-      '<h1>表示できません</h1>' +
+      pageHead('ERROR', '表示できません') +
       '<div class="alert error">' + esc(msg || 'ページが見つかりません。') + '</div>' +
       '<div class="btn-row"><a class="btn" href="#/">現場一覧へ戻る</a></div>';
   }
@@ -1165,6 +1505,7 @@
   function route() {
     var r = parseHash();
     window.scrollTo(0, 0);
+    stopScan();   // 別の画面へ移ったらカメラを必ず解放する
 
     if (r.entry !== undefined) return handleEntry(r.entry);
 
@@ -1203,6 +1544,9 @@
         if (p[1] === 'labels') return renderPrintLabels(r.params);
         if (p[1] === 'records') return renderPrintRecords(r.params);
         return renderNotFound();
+
+      case 'scan':
+        return renderScan();
 
       case 'settings':
         return renderSettings();

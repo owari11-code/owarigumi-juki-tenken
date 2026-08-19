@@ -478,7 +478,14 @@
       getNumDataCodewords: getNumDataCodewords,
       toUtf8Bytes: toUtf8Bytes,
       encodeToCodewords: encodeToCodewords,
-      addEccAndInterleave: addEccAndInterleave
+      addEccAndInterleave: addEccAndInterleave,
+      /* 読み取り側(qrdecode.js)と表を共有する */
+      ECC_CODEWORDS_PER_BLOCK: ECC_CODEWORDS_PER_BLOCK,
+      NUM_ERROR_CORRECTION_BLOCKS: NUM_ERROR_CORRECTION_BLOCKS,
+      ECL_FORMAT_BITS: ECL_FORMAT_BITS,
+      getNumRawDataModules: getNumRawDataModules,
+      getAlignmentPatternPositions: getAlignmentPatternPositions,
+      gmul: gmul, EXP: EXP, LOG: LOG
     }
   };
 })(typeof window !== 'undefined' ? window : this);
