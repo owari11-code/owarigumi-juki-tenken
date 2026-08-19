@@ -1,4 +1,4 @@
-/* 重機 日常点検アプリ — 現場でスマホから使うことを前提にした画面設計 */
+/* マル点（重機日常点検アプリ）— 現場でスマホから使うことを前提にした画面設計 */
 :root {
   --green: #1b5e20;
   --green-dark: #104014;
@@ -50,6 +50,9 @@ html, body {
   font-size: 15px;
 }
 .app-header .title { font-size: 18px; font-weight: 700; letter-spacing: .04em; }
+/* 画面が狭いときは説明を隠し、アプリ名を優先する */
+.app-header .tagline { font-size: 11px; opacity: .85; white-space: nowrap; }
+@media (max-width: 420px) { .app-header .tagline { display: none; } }
 .nav-btn {
   color: #fff;
   text-decoration: none;

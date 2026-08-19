@@ -876,7 +876,7 @@
         '<div class="m-name">' + esc(m.name) + '</div>' +
         '<div class="m-sub">' + esc(D.machineTypeName(m.type)) + (m.serial ? '／機番 ' + esc(m.serial) : '') + '</div>' +
         '<div class="m-sub">' + esc(site ? site.name : '') + '</div>' +
-        '<div class="m-guide">作業前・作業後にスマートフォンで読み取り、日常点検を記録してください</div>';
+        '<div class="m-guide"><strong>マル点</strong>／作業前・作業後にスマートフォンで読み取り、点検を記録してください</div>';
       cell.appendChild(cap);
       grid.appendChild(cell);
       drawQr(qrHost, url, 150);
@@ -1059,7 +1059,7 @@
       var blob = new Blob([Store.exportJson()], { type: 'application/json' });
       var a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = '重機点検データ_' + todayStr() + '.json';
+      a.download = 'マル点データ_' + todayStr() + '.json';
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
