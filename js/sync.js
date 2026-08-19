@@ -117,7 +117,13 @@
     if (res && res.status) {
       return 'サーバーエラー（' + res.status + '）' + (message ? '：' + message : '');
     }
-    return 'ネットワークに接続できません。電波の状態をご確認ください。';
+    // 端末は通信できているのに届かない場合は、保管先(Supabase)側の停止が疑わしい
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      return '端末が通信できていません。電波の状態をご確認ください。'
+        + '（点検の記録は端末に保存され、つながった時点で自動送信されます）';
+    }
+    return 'データの保管先に接続できません。保管先が停止しているか、URLが変わった可能性があります。'
+      + '事務所へご連絡ください。（点検の記録は端末に保存されています）';
   }
 
   function failWith(r) {
@@ -221,7 +227,10 @@
         return changed;
       })
       .catch(function (e) {
-        status.lastError = e.message || String(e);
+        // 送信側で通信に失敗した場合も分かりやすい文言にそろえる
+        var m = (e && e.message) || '';
+        status.lastError = (!m || /Failed to fetch|NetworkError|Load failed/i.test(m))
+          ? describeError(null, '') : m;
         running = false;
         status.running = false;
         notify(0);
