@@ -1,1 +1,11 @@
-
+# ここに書いたものは公開されません（Cloudflareが配信対象から外します）
+# サーバー側の処理と設定は、画面から読めないようにする
+worker.js
+wrangler.jsonc
+.assetsignore
+functions/
+.github/
+design/
+README.md
+*.xlsx
+*.md
