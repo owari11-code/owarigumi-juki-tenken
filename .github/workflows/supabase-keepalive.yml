@@ -1,1 +1,52 @@
+# Supabaseの無料プランは7日間アクセスがないとプロジェクトを一時停止する。
+# それを防ぐため、週2回 Cloudflare 側の稼働確認用の入口を叩く。
+# データベースの鍵はこのファイルにもリポジトリにも置かない（Cloudflare側にある）。
+name: 稼働確認（自動停止の防止）
 
+on:
+  schedule:
+    # 毎週 月曜・木曜 01:00 UTC（日本時間 10:00）
+    - cron: '0 1 * * 1,4'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 稼働を確認する
+        env:
+          APP_URL: ${{ secrets.APP_URL }}                 # 例: https://maruten.pages.dev
+          KEEPALIVE_TOKEN: ${{ secrets.KEEPALIVE_TOKEN }} # Cloudflareの環境変数と同じ値
+        run: |
+          set -u
+          if [ -z "${APP_URL:-}" ] || [ -z "${KEEPALIVE_TOKEN:-}" ]; then
+            echo "::error::リポジトリのSecretsに APP_URL と KEEPALIVE_TOKEN を登録してください。"
+            exit 1
+          fi
+          URL="${APP_URL%/}/api/ping"
+          echo "確認先: ${APP_URL%/}/api/ping"
+
+          CODE=$(curl -s -o /tmp/body.txt -w '%{http_code}' --max-time 30 \
+            -H "X-Keepalive: $KEEPALIVE_TOKEN" "$URL") || true
+          BODY=$(head -c 300 /tmp/body.txt 2>/dev/null || true)
+          echo "応答: HTTP $CODE"
+
+          case "$CODE" in
+            200)
+              echo "正常です。データベースは稼働しています。" ;;
+            000)
+              echo "::error::サイトに接続できません。Cloudflare Pages の状態を確認してください。"
+              exit 1 ;;
+            403)
+              echo "::error::合言葉が一致しません。GitHubのSecretとCloudflareの環境変数 KEEPALIVE_TOKEN を揃えてください。"
+              exit 1 ;;
+            503)
+              echo "::error::サーバー側の設定が未完了です: $BODY"
+              exit 1 ;;
+            502)
+              echo "::error::データの保管先に接続できません。Supabaseが停止している可能性があります: $BODY"
+              exit 1 ;;
+            *)
+              echo "::error::想定外の応答（HTTP $CODE）: $BODY"
+              exit 1 ;;
+          esac
