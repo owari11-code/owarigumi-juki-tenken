@@ -420,6 +420,29 @@ textarea { min-height: 84px; resize: vertical; }
 }
 .scan-status.error { border: 2px solid var(--red); background: rgba(198,40,40,.06); }
 
+/* ---------- 安全確認（Turnstile）の表示 ---------- */
+.ts-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(29, 45, 61, .55);
+}
+.ts-box {
+  background: var(--paper);
+  border: 1px solid var(--divider);
+  padding: 18px 16px;
+  max-width: 340px;
+  width: 100%;
+  text-align: center;
+}
+.ts-box .ts-title { font-weight: 700; font-size: 15px; }
+.ts-box .ts-note { font-size: 12px; color: var(--muted); margin: 6px 0 12px; }
+.ts-box iframe { max-width: 100%; }
+
 /* ---------- 表 ---------- */
 table.data { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 table.data th, table.data td { border: 1px solid var(--divider); padding: 6px 8px; text-align: left; vertical-align: top; }

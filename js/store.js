@@ -187,9 +187,9 @@
     return {
       baseUrl: s.baseUrl || cfg.baseUrl || '',
       company: s.company || cfg.company || '',
-      supabaseUrl: s.supabaseUrl || cfg.supabaseUrl || '',
-      supabaseAnonKey: s.supabaseAnonKey || cfg.supabaseAnonKey || '',
-      space: s.space || cfg.space || 'default',
+      // データのやり取り先。鍵はサーバー側にあり、ここには秘密の値を持たない
+      apiBase: (s.apiBase !== undefined && s.apiBase !== null ? s.apiBase : cfg.apiBase) || '',
+      turnstileSiteKey: s.turnstileSiteKey || cfg.turnstileSiteKey || '',
       syncEnabled: s.syncEnabled === undefined ? true : !!s.syncEnabled
     };
   }

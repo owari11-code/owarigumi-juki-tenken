@@ -66,7 +66,8 @@
 
   function go(hash) { location.hash = hash; }
 
-  /* Supabase側で最初に1回だけ実行するSQL（設定画面からコピーできる） */
+  /* Supabase側で1回だけ実行するSQL（設定画面からコピーできる）
+     ブラウザからは触れないようにし、Cloudflare経由でのみ読み書きできる状態にする */
   var SETUP_SQL = [
     '-- 点検データの置き場（1テーブルだけ）',
     'create table if not exists public.juki_records (',
@@ -94,12 +95,17 @@
     '  before insert or update on public.juki_records',
     '  for each row execute function public.juki_touch();',
     '',
-    '-- ログインを使わないため、匿名キーでの読み書きを許可する',
+    '-- ここが安全対策の要。ブラウザ用の匿名キーからは一切触れないようにする。',
+    '-- 読み書きは Cloudflare 側（service_role キーを持つサーバー処理）だけが行う。',
     'alter table public.juki_records enable row level security;',
     '',
     'drop policy if exists "app access" on public.juki_records;',
-    'create policy "app access" on public.juki_records',
-    '  for all to anon using (true) with check (true);'
+    'drop policy if exists "app read"   on public.juki_records;',
+    'drop policy if exists "app insert" on public.juki_records;',
+    'drop policy if exists "app update" on public.juki_records;',
+    '',
+    'revoke all on public.juki_records from anon;',
+    'revoke all on public.juki_records from authenticated;'
   ].join('\n');
 
   function qs(sel) { return app.querySelector(sel); }
@@ -1085,30 +1091,28 @@
       '<h2><span class="kicker">SYNC</span>端末間の自動共有</h2>' +
       '<div class="card">' +
       '<p id="sync-state">' + syncStateText(st) + '</p>' +
-      field('Supabase の Project URL', '<input type="url" id="f-supaurl" value="' + esc(s.supabaseUrl) + '" placeholder="https://xxxxxxxx.supabase.co">') +
-      field('anon public キー', '<input type="text" id="f-supakey" value="' + esc(s.supabaseAnonKey) + '" placeholder="eyJhbGciOi...">') +
-      field('共有コード', '<input type="text" id="f-space" value="' + esc(s.space) + '" placeholder="default">') +
+      '<div id="server-state" class="muted">サーバーの設定状況を確認しています…</div>' +
       '<label class="field"><span>自動同期</span>' +
       '<select id="f-syncon"><option value="1"' + (s.syncEnabled ? ' selected' : '') + '>する</option>' +
       '<option value="0"' + (s.syncEnabled ? '' : ' selected') + '>しない（この端末だけで使う）</option></select></label>' +
       '<div class="btn-row">' +
-      '<button class="btn" id="b-syncsave">保存して接続</button>' +
+      '<button class="btn" id="b-syncsave">保存</button>' +
       '<button class="btn secondary" id="b-syncnow">今すぐ同期</button>' +
       '</div>' +
-      '<p class="muted">同じ「共有コード」を使う端末どうしでデータが共有されます。' +
-      'この3項目を <code>js/config.js</code> に書いて公開しておくと、QRから開いた端末すべてに自動で設定されます。<br>' +
-      'URLは <code>https://〇〇.supabase.co</code> まで。末尾の <code>/rest/v1/</code> は付けても自動で取り除きます。</p>' +
+      '<p class="muted">データベースの鍵はこの端末には保存されていません。' +
+      'Cloudflare 側（サーバー）が鍵を持ち、削除の禁止・件数制限・接続元の制限を行っています。' +
+      '接続先の設定は Cloudflare の環境変数で行うため、この画面での入力は不要です。</p>' +
       '<details class="sql-box"><summary>Supabase側の準備（初回だけ必要なSQL）</summary>' +
-      '<p class="muted">Supabaseの左メニュー <strong>SQL Editor</strong> を開き、下のSQLを貼り付けて <strong>Run</strong> を押してください。' +
-      'これを実行しないと「テーブル juki_records がまだありません」と表示されます。</p>' +
+      '<p class="muted">Supabaseの <strong>SQL Editor</strong> に貼り付けて <strong>Run</strong> を押してください。' +
+      'テーブルを作り、ブラウザ用の匿名キーからは触れないように締めます。</p>' +
       '<div class="btn-row"><button class="btn small secondary" id="b-copysql">SQLをコピー</button></div>' +
       '<pre id="sql-text">' + esc(SETUP_SQL) + '</pre></details>' +
       '</div>' +
 
       '<h2><span class="kicker">URL</span>QRコードに埋め込むURL</h2>' +
       '<div class="card">' +
-      '<p class="muted">スマートフォンでQRを読み取ったときに開くアドレスです。社内サーバーや共有フォルダ、' +
-      'GitHub Pages などにこのアプリ一式を置き、そのURLを入れてください。</p>' +
+      '<p class="muted">スマートフォンでQRを読み取ったときに開くアドレスです。' +
+      'Cloudflare Pages で公開したURL（https://〇〇.pages.dev/ など）を入れてください。</p>' +
       field('公開URL', '<input type="url" id="f-base" value="' + esc(s.baseUrl || '') + '" placeholder="' + esc(defaultUrl) + '">') +
       '<p class="muted">未入力の場合は、いま開いているURL（' + esc(defaultUrl) + '）を使います。</p>' +
       field('会社名（帳票の表示用）', '<input type="text" id="f-company" value="' + esc(s.company || '') + '">') +
@@ -1151,30 +1155,36 @@
     };
 
     qs('#b-syncsave').onclick = function () {
-      // 管理画面から /rest/v1/ 付きでコピーされることがあるので整えて保存する
-      var url = Sync.normalizeUrl(val('#f-supaurl'));
-      qs('#f-supaurl').value = url;
-      var key = val('#f-supakey');
-      var space = val('#f-space') || 'default';
       var on = val('#f-syncon') === '1';
       var local = Store.getLocalSettings();
-      local.supabaseUrl = url;
-      local.supabaseAnonKey = key;
-      local.space = space;
       local.syncEnabled = on;
       Store.saveSettings(local);
-
-      if (!on) { Sync.stop(); toast('自動同期を停止しました'); renderSettings(); return; }
-      if (!url || !key) { toast('URLとキーを入力してください'); return; }
-      qs('#sync-state').textContent = '接続を確認しています…';
-      Sync.test(url, key, space).then(function () {
+      if (on) {
         Sync.start();
-        toast('接続しました。同期を開始します');
-        renderSettings();
-      }).catch(function (e) {
-        qs('#sync-state').innerHTML = '<span style="color:var(--red)">接続できません：' + esc(e.message) + '</span>';
-      });
+        toast('自動同期を開始しました');
+      } else {
+        Sync.stop();
+        toast('自動同期を停止しました');
+      }
+      renderSettings();
     };
+
+    // サーバー側（Cloudflare）の設定状況を表示する
+    Sync.test().then(function (info) {
+      var box = qs('#server-state');
+      if (!box) return;
+      function mark(ok, label, hint) {
+        return '<div>' + (ok ? '✓ ' : '× ') + esc(label) +
+          (ok ? '' : '<span class="muted">　' + esc(hint) + '</span>') + '</div>';
+      }
+      box.innerHTML =
+        mark(info.database, 'データベース接続', 'Cloudflareの環境変数 SUPABASE_URL / SUPABASE_SERVICE_KEY を設定してください') +
+        mark(info.session, '利用確認（セッション）', 'Cloudflareの環境変数 SESSION_SECRET を設定してください') +
+        mark(info.turnstile, '自動化アクセスの遮断（Turnstile）', 'Cloudflareの環境変数 TURNSTILE_SECRET と config.js の turnstileSiteKey を設定してください');
+    }, function (e) {
+      var box = qs('#server-state');
+      if (box) box.innerHTML = '<span style="color:var(--red)">サーバーに接続できません：' + esc(e.message) + '</span>';
+    });
 
     qs('#b-copysql').onclick = function () {
       var text = SETUP_SQL;

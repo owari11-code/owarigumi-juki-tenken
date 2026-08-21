@@ -18,9 +18,18 @@
 ```
 重機点検アプリ/
 ├─ index.html        画面の入れ物
+├─ _headers          セキュリティ用のHTTPヘッダー（Cloudflareが適用）
+├─ wrangler.jsonc    Workers方式で公開するときの設定
+├─ worker.js         Workers方式の入口（Pages方式では使われません）
+├─ .assetsignore     公開しないファイルの指定（サーバー処理・書類など）
+├─ functions/api/    ★サーバー側の処理（鍵を持つのはここだけ）
+│   ├─ _lib.js       共通処理（署名・接続元の確認など）
+│   ├─ records.js    点検データの読み書き（削除は不可）
+│   ├─ session.js    利用確認（Turnstile）
+│   └─ ping.js       稼働確認（自動停止の防止）
 ├─ css/style.css     スタイル（画面用＋印刷用）
 └─ js/
-   ├─ config.js      ★公開前に書き換えるのはこのファイルだけ
+   ├─ config.js      公開URLとTurnstileのSite Key（秘密の値は書きません）
    ├─ qrcode.js      QRコード生成（自作・外部通信なし）
    ├─ qrdecode.js    QRコード読み取り（自作。iOSはBarcodeDetector非対応のため）
    ├─ data.js        機種区分と点検項目の定義
@@ -31,183 +40,193 @@
 
 ---
 
+# セキュリティの考え方
+
+以前は、データベースの鍵をブラウザ（`config.js`）に置いていました。公開サイトから誰でも読めるため、
+**URLを知る人なら誰でも点検記録を読み・書き・消せる**状態でした。
+
+現在は次の構成に変えています。
+
+```
+スマホ／PC  ──①──▶  Cloudflare Pages（アプリ本体＋サーバー処理）  ──②──▶  Supabase（保管庫）
+                       ここだけが鍵を持つ
+```
+
+- ①**ブラウザは鍵を持ちません。** 同じドメインの `/api/...` を呼ぶだけです。
+- ②鍵（`service_role`）は Cloudflare の環境変数に暗号化保存され、画面のコードからは見えません。
+- Supabase 側は匿名キーからの読み書きを**すべて禁止**します。鍵が漏れても、そこからは何もできません。
+
+サーバー処理（`functions/api/`）が守っていること:
+
+| 対策 | 内容 |
+|---|---|
+| 削除の禁止 | データを消すAPIを用意していません。消去は「削除済みの印」だけで、履歴は残ります |
+| 共有コードの固定 | サーバー側で固定。他社・他現場のデータは指定できません |
+| 入力の検査 | 識別子の形式、種別、件数（200件）、1件の大きさ（32KB）、本文全体（1MB）を検査 |
+| 接続元の制限 | 別サイトに置かれた画面からの呼び出しを拒否します |
+| 自動化の遮断 | Cloudflare Turnstile を通過した端末だけに、12時間有効の証明を発行します |
+| 通信の制限 | Cloudflare のレート制限で、短時間の大量アクセスを遮断します |
+
+---
+
 # 導入手順
 
-大きく3ステップです。**①データの保管場所を作る（Supabase）→ ②設定を書き込む → ③公開する（GitHub Pages）**。
-全部無料でできます。初回の所要時間は30分ほどです。
+**①Supabaseを締める → ②Cloudflare Pagesに公開 → ③環境変数を設定 → ④QRラベルを刷り直す**
+の順に進めます。所要1時間ほど、費用は無料の範囲で収まります。
 
-## ステップ1　データの保管場所を作る（Supabase）
+## ステップ1　Supabase を締める
 
-端末どうしでデータを共有するための置き場です。
+1. <https://supabase.com/dashboard> でプロジェクトを開く（停止中なら **Restore**）。
+2. 左メニュー **SQL Editor** に、アプリの **設定 → Supabase側の準備** からコピーしたSQLを貼って **Run**。
+   テーブルを作り、**匿名キーからの読み書きを禁止**します。
+3. **Project Settings → API Keys** で、次を控える。
+   - **Project URL**（`https://xxxxxxxx.supabase.co`）
+   - **`service_role`**（または `sb_secret_…`）の鍵 ← **絶対に公開しない鍵です**
+4. 同じ画面で、**これまで使っていた `sb_publishable_…` の鍵を無効化（Revoke／Delete）** してください。
+   公開リポジトリに残っており、履歴からも取得できるためです。
 
-1. <https://supabase.com> を開き、右上の **Start your project** からサインアップ（GitHubアカウントかメールでOK）。
-2. **New project** を押す。
-   - Name：`juki-tenken` など分かる名前
-   - Database Password：自動生成のままでよい（**控えは保存しておく**）
-   - Region：`Northeast Asia (Tokyo)` を選ぶ（現場からの反応が速くなります）
-   - **Create new project** を押し、準備完了まで1〜2分待つ。
-3. 左メニューの **SQL Editor**（電卓のようなアイコン）を開き、下のSQLを貼り付けて **Run** を押す。
+> `service_role` の鍵は Cloudflare の環境変数にだけ入れます。`config.js` やリポジトリには絶対に書かないでください。
 
-（このSQLはアプリの **設定** 画面からもコピーできます。何度実行しても問題ありません。）
+## ステップ2　Cloudflare に公開する
 
-```sql
--- 点検データの置き場（1テーブルだけ）
-create table if not exists public.juki_records (
-  id         text primary key,
-  space      text not null,
-  kind       text not null,
-  data       jsonb not null,
-  deleted    boolean not null default false,
-  updated_at timestamptz not null default now()
-);
+Cloudflare は新規プロジェクトを **Workers** に誘導する画面構成に変わりました。
+このリポジトリは **Workers・Pages のどちらでも動く**ように作ってあります。
+画面に出てきた方で進めてください（推奨は Workers）。
 
-create index if not exists juki_records_space_updated_idx
-  on public.juki_records (space, updated_at);
+### 方法A：Workers（いまの標準）
 
--- 更新のたびにサーバー側の時刻を打ち直す（取りこぼし防止）
-create or replace function public.juki_touch()
-returns trigger language plpgsql as $$
-begin
-  new.updated_at = now();
-  return new;
-end $$;
+1. <https://dash.cloudflare.com> にログイン。
+2. 左メニュー **Workers**（または **Compute** / **Workers & Pages**）を開く。
+3. **Create**（または **Create application**）を押す。
+   「**Ship something new**」という画面が出たら、そこが作成画面です。
+4. **「Import a repository」**（リポジトリを取り込む）を選ぶ。
+   ※テンプレート一覧やHello Worldではなく、Gitから取り込む方を選びます。
+5. **Continue with GitHub** → 連携を許可 → `owarigumi-juki-tenken` を選ぶ。
+6. ビルド設定は次のとおり（ほぼ既定のままです）。
+   - Project name: `maruten`（`wrangler.jsonc` と合わせると分かりやすい）
+   - Build command: **空欄**
+   - Deploy command: `npx wrangler deploy`（既定のまま）
+   - Root directory: `/`
+7. **Create and deploy** を押す。1〜2分で `https://maruten.〇〇.workers.dev` が発行されます。
 
-drop trigger if exists juki_touch_trg on public.juki_records;
-create trigger juki_touch_trg
-  before insert or update on public.juki_records
-  for each row execute function public.juki_touch();
+`wrangler.jsonc` に設定を書いてあるので、画面側で追加の指定は不要です。
+`/api/...` は `worker.js` が受け持ち、それ以外は画面ファイルが返ります。
 
--- ログインを使わないため、匿名キーでの読み書きを許可する
-alter table public.juki_records enable row level security;
+### 方法B：Pages（従来の方式。画面に出る場合のみ）
 
-drop policy if exists "app access" on public.juki_records;
-create policy "app access" on public.juki_records
-  for all to anon using (true) with check (true);
-```
+1. **Workers & Pages** を開く → **Create application** → **Pages** タブ → **Connect to Git**。
+2. `owarigumi-juki-tenken` を選ぶ。
+3. Framework preset: **None** ／ Build command: **空欄** ／ Build output directory: **`/`**
+4. **Save and Deploy**。`https://〇〇.pages.dev` が発行されます。
 
-実行後に `Success. No rows returned` と出れば成功です。
+この場合は `functions/api/` が自動で `/api/...` に割り当てられます（`worker.js` は使われません）。
 
-4. 次の2つを控える。画面上部の **Connect** ボタン →**App Frameworks** タブを開くと2つまとめて表示されるので、それが一番簡単です。
-   （個別に開く場合は `https://supabase.com/dashboard/project/_/settings/api-keys` と
-   `https://supabase.com/dashboard/project/_/settings/general`）
-   - **Project URL** … `https://xxxxxxxxxxxx.supabase.co`
-   - **キー** … `anon public`（`eyJ…`）または `publishable`（`sb_publishable_…`）。**どちらでも使えます**
+> **リポジトリを非公開にできます。** どちらの方式でも非公開リポジトリから公開できます。
+> GitHub の **Settings → General → Change repository visibility → Private** に変更してください。
+> （GitHub Pages の公開は止まりますが、以後は Cloudflare 側のURLを使います）
 
-> **注意1：** Project URL は `https://xxxxxxxxxxxx.supabase.co` **まで**です。
-> 管理画面には `.../rest/v1/` 付きで表示される箇所がありますが、`/rest/v1/` は付けません
-> （付いていてもアプリ側で自動的に取り除きます）。
->
-> **注意2：** `service_role` や `sb_secret_…` のキーは絶対に使わないでください（全権限のキーです）。
+## ステップ3　環境変数を設定する
 
-## ステップ2　設定を書き込む
+Cloudflare のプロジェクトを開き、**Settings → Variables and Secrets**（Pagesの場合は
+**Production** と **Preview** の両方）に登録します。鍵は必ず **Secret（暗号化）** を選んでください。
 
-`js/config.js` をメモ帳などで開き、控えた値を入れて保存します。
+| 名前 | 種別 | 値 |
+|---|---|---|
+| `SUPABASE_URL` | Text | `https://xxxxxxxx.supabase.co` |
+| `SUPABASE_SERVICE_KEY` | **Secret** | ステップ1の `service_role` の鍵 |
+| `SPACE` | Text | 共有コード（例：`owarigumi`） |
+| `SESSION_SECRET` | **Secret** | ランダムな長い文字列（下の作り方参照） |
+| `TURNSTILE_SECRET` | **Secret** | ステップ4で取得 |
+| `KEEPALIVE_TOKEN` | **Secret** | ランダムな長い文字列 |
 
-```js
-window.APP_CONFIG = {
-  baseUrl: 'https://<GitHubのユーザー名>.github.io/juki-tenken/',
-  supabaseUrl: 'https://xxxxxxxxxxxx.supabase.co',
-  supabaseAnonKey: 'eyJhbGciOi...（anon public キー）',
-  space: 'owarigumi',      // 共有コード。社名など、他社と重ならない文字列
-  company: '株式会社○○組'
-};
-```
-
-`baseUrl` はステップ3で決まるURLです。GitHubのユーザー名とリポジトリ名が決まっていれば
-先に書いてしまって構いません（後から直しても大丈夫です）。
-
-**このファイルに書いておけば、QRから開いた全ての端末に設定が自動で行き渡ります。**
-各スマホでの設定入力は不要です。
-
-## ステップ3　公開する（GitHub Pages）
-
-1. <https://github.com> でアカウントを作成（無料）。
-2. 右上の **＋ → New repository**。
-   - Repository name：`juki-tenken`
-   - **Public** を選ぶ
-   - **Create repository** を押す
-3. 次の画面の **uploading an existing file** をクリック。
-4. `重機点検アプリ` フォルダの**中身**（`index.html`、`css`、`js`）をドラッグ＆ドロップ。
-   - フォルダごとではなく、`index.html` が一番上に来るようにしてください。
-5. 下の **Commit changes** を押す。
-6. 上部タブの **Settings → Pages** を開く。
-   - Source：**Deploy from a branch**
-   - Branch：**main** ／ フォルダ：**/ (root)** → **Save**
-7. 1〜2分待つと同じ画面に公開URLが出ます。
+ランダムな文字列は、ブラウザのアドレス欄で次を実行すると作れます（結果をコピー）。
 
 ```
-https://<ユーザー名>.github.io/juki-tenken/
+javascript:prompt('コピーしてください', crypto.randomUUID()+crypto.randomUUID())
 ```
 
-このURLをスマートフォンで開いて、画面が出れば公開成功です。
-（`js/config.js` の `baseUrl` がこのURLと違っていたら、GitHub上でファイルを開いて
-鉛筆マークから直し、**Commit changes** を押してください。）
+登録したら再デプロイして反映します（**Deployments** の最新の行から **Retry deployment**、
+またはGitHubに何かコミットすると自動で再デプロイされます）。
 
-> 更新のしかた：ファイルを直したら、同じリポジトリで **Add file → Upload files** から
-> 上書きアップロードすれば、1〜2分で反映されます。
+## ステップ4　Turnstile（自動化アクセスの遮断）を設定する
 
-## ステップ4　使いはじめる
+1. Cloudflare の左メニュー **Turnstile → Add widget**。
+2. Widget name は任意、Domain に公開URLのドメイン（`maruten.〇〇.workers.dev` または `〇〇.pages.dev`）を追加、Widget Mode は **Managed**。
+3. 発行された **Site Key**（公開してよい）と **Secret Key**（非公開）を控える。
+4. `js/config.js` の `turnstileSiteKey` に **Site Key** を書いて保存・アップロード。
+5. Cloudflare の環境変数 `TURNSTILE_SECRET` に **Secret Key** を登録。
 
-1. パソコンで公開URLを開く。右上のランプが水色の **同期済** になっていることを確認。
-2. **＋ 工事現場を登録** … 工事番号・工事名・発注者・工期（カレンダーで選択）・現場代理人
-3. 現場を開いて **＋ 重機を登録** … 呼び名・機種・メーカー・型式・機番
-4. **QRラベルを印刷** … A4で印刷し、ラミネート等で保護して運転席から見える位置に貼付
-5. 現場でQRを読み取る → 重機のページが開く → **作業開始前点検を行う**
-   - スマートフォン標準のカメラでも、アプリの **「QRを読み取って点検」** ボタンでも読み取れます
-6. 各項目を「良／否／該当なし」で答えて **点検を記録する**（上部に残り項目数が出ます）
+現場では、初回と1日1回だけ短い確認が入ります（多くの場合は画面に何も出ずに通過します）。
 
-機種は点検項目の出し分けに使います（クローラ式は「クローラの張り具合」、
-ホイール式は「タイヤの空気圧」が表示されます）。
-「否」が1つでもあると、判定は **要整備** になります。
+## ステップ5　レート制限をかける
+
+Cloudflare の **Security → WAF → Rate limiting rules → Create rule**：
+
+- Rule name: `api-limit`
+- If incoming requests match: **URI Path** — **starts with** — `/api/`
+- Rate: **60 requests** per **1 minute** per **IP**
+- Action: **Block**（期間 1分）
+
+正常な利用は1端末あたり毎分3回程度なので、余裕をもって収まります。
+
+## ステップ6　QRコードのURLを更新する
+
+公開URLが `https://maruten.〇〇.workers.dev/`（Pagesの場合は `https://〇〇.pages.dev/`）に変わるため、次の対応が必要です。
+
+1. `js/config.js` の `baseUrl` を新しいURLに書き換えてアップロード
+2. アプリで **QRラベルを印刷** し直し、**機体のラベルを貼り替える**
+
+> 貼り替えを避けたい場合は、独自ドメイン（例 `juki.owarigumi.co.jp`）を Cloudflare に設定し、
+> そのURLを `baseUrl` にしてください。以後は置き場所を変えてもラベルはそのまま使えます。
+
+## ステップ7　稼働確認の自動実行（任意）
+
+GitHub の **Settings → Secrets and variables → Actions** に登録します。
+
+| Secret 名 | 値 |
+|---|---|
+| `APP_URL` | `https://〇〇.pages.dev` |
+| `KEEPALIVE_TOKEN` | ステップ3と同じ値 |
+
+週2回、`/api/ping` に自動アクセスして Supabase の自動停止を防ぎます。
+失敗するとGitHubからメールが届くので、障害の早期発見にもなります。
 
 ---
 
 # 端末間の自動共有について
 
-- 保存した内容は数秒で他の端末に届きます。受け取り側は**アプリを開いている間、20秒ごとに自動取得**します
-  （画面を切り替えて戻ったとき、通信が回復したときにも取得します）。
+- 保存した内容は数秒で他の端末に届きます。受け取り側は**アプリを開いている間、20秒ごとに自動取得**します。
 - 電波が届かない場所でも点検の記録はできます。端末内に保存され、**電波が戻った時点で自動送信**されます。
-  右上のランプが「未送信 ○件」と出ている間は、まだ送れていない記録があるという意味です。
 - 初めての端末でQRを読むと、まずサーバーから現場・重機の情報を取り寄せてから点検画面を開きます。
 - 同じ内容を2台で同時に編集した場合は、**後から保存した方**が残ります。
-- 現場や重機を削除すると、他の端末でも削除されます。
-- 共有を分けたいときは `config.js` の `space`（共有コード）を変えて、別フォルダで公開してください。
-
-### 押さえておいていただきたい点
-
-公開URLを知っている人は、ログイン無しでこのデータを読み書きできます（ログイン不要と引き換えの仕組みです）。
-点検記録という性質上そこまで機微ではありませんが、URLは社内・協力会社の範囲にとどめてください。
-より厳密に守りたい場合は、ログイン機能の追加をご相談ください。
+- 現場や重機を削除すると、他の端末でも「削除済み」として反映されます（記録自体は保管庫に残ります）。
 
 ### うまく同期できないときは
 
-アプリの **設定** 画面を開くと、右上のランプの下に理由が日本語で出ます。
+アプリの **設定** 画面に、サーバー側の設定状況（✓／×）と理由が表示されます。
 
-| 表示されるメッセージ | 原因と対処 |
+| 表示 | 対処 |
 |---|---|
-| テーブル juki_records がまだありません | ステップ1のSQLが未実行です。**設定画面の「Supabase側の準備（初回だけ必要なSQL）」からSQLをコピー**し、Supabaseの SQL Editor に貼って Run してください |
-| URLの形式が正しくありません | Project URL に余分なパスが入っています。`https://〇〇.supabase.co` だけにしてください |
-| キーが正しくありません | `anon public` または `publishable` のキーか確認してください（`service_role`／`secret` は不可） |
-| アクセスが許可されていません | SQLのうち `create policy` の部分が実行されていません。SQLをもう一度まとめて実行してください |
-| ネットワークに接続できません | 電波・回線の問題です。記録は端末内に残り、つながった時点で自動送信されます |
-
-### 自動停止の防止（設定済み）
-
-Supabaseの無料プランは、7日間アクセスがないとプロジェクトを一時停止します。
-これを防ぐため、`.github/workflows/supabase-keepalive.yml` を用意しています。
-
-- **毎週 月曜・木曜の10時（日本時間）** に、GitHubから保管先へ自動でアクセスします
-- 接続先は `js/config.js` から読み取るため、この設定ファイルを書き換える必要はありません
-- 保管先に接続できない場合はワークフローが失敗し、**GitHubからメールで通知**されます（停止の早期発見にもなります）
-- GitHubはリポジトリが60日間更新されないと定期実行を止めるため、月に一度だけ
-  `.github/keepalive-log.txt` を更新してその期限をリセットします
-
-リポジトリの **Actions** タブから、実行履歴の確認と手動実行（Run workflow）ができます。
+| データベース接続 × | Cloudflareの環境変数 `SUPABASE_URL` / `SUPABASE_SERVICE_KEY` を確認 |
+| 利用確認（セッション）× | Cloudflareの環境変数 `SESSION_SECRET` を確認 |
+| 自動化アクセスの遮断 × | `TURNSTILE_SECRET` と `config.js` の `turnstileSiteKey` を確認 |
+| テーブル juki_records がまだありません | ステップ1のSQLが未実行 |
+| データの保管先に接続できません | Supabaseが停止している可能性。管理画面で Restore |
+| 端末が通信できていません | 電波の問題。記録は端末に残り、復帰後に自動送信されます |
 
 ### バックアップ
 
 **設定 → データを書き出す** でJSONファイルとして保存できます。
 サーバー側も Supabase の管理画面（Table Editor → juki_records）から確認・エクスポートできます。
+
+### 残るリスク（把握しておいてください）
+
+- **URLを知る人は、依然として点検記録を見られます。** ログインを設けていないためです。
+  Turnstile は自動化された大量取得を防ぎますが、人が手作業で開くことは止められません。
+  完全に防ぐにはログイン（Cloudflare Access 等）の追加が必要です。
+- 書き込みも同様に、URLを知る人なら手作業では可能です。ただし削除はできず、
+  すべての変更は保管庫に履歴として残ります。
+- 公開リポジトリに残っている**古い鍵は必ず無効化**してください（ステップ1-4）。
 
 ---
 

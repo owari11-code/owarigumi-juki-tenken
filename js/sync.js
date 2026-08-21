@@ -1,10 +1,8 @@
 /*
- * sync.js - 端末間の自動同期（Supabase）
+ * sync.js - 端末間の自動同期
  *
- * ログイン画面を出さずに共有するため、Supabase の anon(公開)キーで
- * 1つのテーブル juki_records を読み書きする。
- *   id / space(共有コード) / kind(sites|machines|inspections) / data(レコード本体)
- *   / deleted / updated_at(サーバー時刻・取得の目印)
+ * ブラウザはデータベースに直接つながず、同じドメインの /api/... だけを呼ぶ。
+ * データベースの鍵は Cloudflare 側（サーバー）にあり、画面のコードからは見えない。
  *
  * 流れ: ①サーバーの新着を取得して取り込む → ②未送信の変更を送る
  * これを「起動時／画面を開いたとき／保存直後／一定間隔」で行う。
@@ -12,16 +10,18 @@
 (function (global) {
   'use strict';
 
-  var TABLE = 'juki_records';
   var POLL_MS = 20000;      // 画面を開いている間の自動取得間隔
   var PUSH_DELAY_MS = 1200; // 保存してから送信するまでの待ち（連続保存をまとめる）
   var CURSOR_KEY = 'juki-sync-cursor';
   var EPOCH = '1970-01-01T00:00:00.000Z';
+  var MAX_PUSH = 200;       // サーバー側の受付上限に合わせる
 
   var listeners = [];
   var timer = null;
   var pushTimer = null;
   var running = false;
+  var sessionWork = null;
+  var turnstileLoading = null;
   var status = {
     configured: false,
     enabled: false,
@@ -31,41 +31,23 @@
     pending: 0
   };
 
-  /**
-   * 入力されたURLを「https://xxxx.supabase.co」の形にそろえる。
-   * 管理画面からコピーすると末尾に /rest/v1/ が付いていることがあり、
-   * そのままだとパスが二重になって接続できないため、パス以降は落とす。
-   */
-  function normalizeUrl(raw) {
-    var u = String(raw || '').trim();
-    if (!u) return '';
-    if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
-    try {
-      var parsed = new URL(u);
-      return parsed.protocol + '//' + parsed.host;
-    } catch (e) {
-      return u.replace(/\/rest\/v1\/?$/i, '').replace(/\/+$/, '');
-    }
-  }
-
   function config() {
     var s = Store.getSettings();
     return {
-      url: normalizeUrl(s.supabaseUrl),
-      key: (s.supabaseAnonKey || '').trim(),
-      space: s.space || 'default',
+      apiBase: (s.apiBase || '').replace(/\/+$/, ''),
+      siteKey: s.turnstileSiteKey || '',
       enabled: s.syncEnabled !== false
     };
   }
 
-  function isConfigured() {
-    var c = config();
-    return !!(c.url && c.key);
-  }
+  function api(path) { return config().apiBase + path; }
 
+  /** ファイルとして開いている場合はサーバーが無いので同期できない */
+  function isConfigured() {
+    return location.protocol === 'http:' || location.protocol === 'https:';
+  }
   function isActive() {
-    var c = config();
-    return !!(c.url && c.key && c.enabled);
+    return isConfigured() && config().enabled;
   }
 
   function cursor() {
@@ -75,16 +57,6 @@
     try { localStorage.setItem(CURSOR_KEY, v); } catch (e) { /* 保存できなくても動作は続く */ }
   }
 
-  function headers(c, extra) {
-    var h = {
-      apikey: c.key,
-      Authorization: 'Bearer ' + c.key,
-      'Content-Type': 'application/json'
-    };
-    if (extra) Object.keys(extra).forEach(function (k) { h[k] = extra[k]; });
-    return h;
-  }
-
   function notify(changed) {
     status.pending = Store.pendingRecords().length;
     listeners.forEach(function (cb) {
@@ -92,107 +64,208 @@
     });
   }
 
-  /** エラー応答を、対処が分かる日本語にして返す */
+  /* ------------------------------------------------------------------ *
+   * 利用確認（Turnstile）
+   * ログインの代わりに「人が操作している端末か」を一度だけ確かめ、
+   * 12時間有効の証明をサーバーから受け取る。
+   * ------------------------------------------------------------------ */
+  function loadTurnstile() {
+    if (global.turnstile) return Promise.resolve();
+    if (turnstileLoading) return turnstileLoading;
+    turnstileLoading = new Promise(function (resolve, reject) {
+      var el = document.createElement('script');
+      el.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+      el.async = true;
+      el.defer = true;
+      el.onload = function () { resolve(); };
+      el.onerror = function () {
+        turnstileLoading = null;
+        reject(new Error('安全確認の仕組みを読み込めませんでした'));
+      };
+      document.head.appendChild(el);
+    });
+    return turnstileLoading;
+  }
+
+  function getTurnstileToken(siteKey) {
+    return loadTurnstile().then(function () {
+      return new Promise(function (resolve, reject) {
+        var overlay = document.createElement('div');
+        overlay.className = 'ts-overlay';
+        overlay.innerHTML = '<div class="ts-box">' +
+          '<div class="ts-title">安全確認</div>' +
+          '<p class="ts-note">初回と1日1回だけ、自動で確認を行います。</p>' +
+          '<div id="ts-widget"></div></div>';
+        document.body.appendChild(overlay);
+
+        var done = false;
+        function finish(fn, arg) {
+          if (done) return;
+          done = true;
+          clearTimeout(timeout);
+          if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+          fn(arg);
+        }
+        var timeout = setTimeout(function () {
+          finish(reject, new Error('安全確認に時間がかかっています'));
+        }, 30000);
+
+        try {
+          global.turnstile.render('#ts-widget', {
+            sitekey: siteKey,
+            appearance: 'interaction-only',   // 必要なときだけ画面に出る
+            callback: function (token) { finish(resolve, token); },
+            'error-callback': function () { finish(reject, new Error('端末の確認に失敗しました')); },
+            'timeout-callback': function () { finish(reject, new Error('安全確認がやり直しになりました')); }
+          });
+        } catch (e) {
+          finish(reject, new Error('安全確認を開始できませんでした'));
+        }
+      });
+    });
+  }
+
+  function postSession(token) {
+    return fetch(api('/api/session'), {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(token ? { token: token } : {})
+    }).then(function (r) {
+      if (!r.ok) return failWith(r);
+      return true;
+    });
+  }
+
+  /** 証明を取り直す。同時に何度も走らないようにまとめる */
+  function ensureSession() {
+    if (sessionWork) return sessionWork;
+    var c = config();
+    var work = c.siteKey
+      ? getTurnstileToken(c.siteKey).then(function (token) { return postSession(token); })
+      : postSession(null);
+    sessionWork = work.then(
+      function (v) { sessionWork = null; return v; },
+      function (e) { sessionWork = null; throw e; }
+    );
+    return sessionWork;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * エラーの説明
+   * ------------------------------------------------------------------ */
   function describeError(res, body) {
     var code = '', message = '';
     try {
       var j = JSON.parse(body);
-      code = j.code || '';
+      code = j.error || '';
       message = j.message || '';
     } catch (e) {
       message = (body || '').slice(0, 120);
     }
-    if (code === 'PGRST205' || code === '42P01' || /schema cache/i.test(message)) {
-      return 'テーブル juki_records がまだありません。Supabase の SQL Editor で README のSQLを実行してください。';
+    if (code === 'not_configured') {
+      return 'サーバー側の接続設定が未完了です。Cloudflareの環境変数（SUPABASE_URL / SUPABASE_SERVICE_KEY）をご確認ください。';
     }
-    if (code === 'PGRST125' || /Invalid path/i.test(message)) {
-      return 'URLの形式が正しくありません。Project URL（https://〇〇.supabase.co）だけを入力してください。';
+    if (code === 'no_session' || code === 'turnstile_required' || code === 'turnstile_failed') {
+      return '安全確認に失敗しました。通信状態を確認して、もう一度お試しください。';
     }
-    if (code === '42501' || /permission denied|row-level security/i.test(message)) {
-      return 'アクセスが許可されていません。README のSQLのうち、ポリシー（create policy）の部分が実行されているか確認してください。';
+    if (code === 'bad_origin') {
+      return '別のサイトからは利用できません。正しいURLから開き直してください。';
     }
-    if (res && (res.status === 401 || res.status === 403)) {
-      return 'キーが正しくありません。Supabase の anon public（または publishable）キーを確認してください。';
+    if (code === 'too_many' || code === 'too_large' || code === 'row_too_large') {
+      return '一度に送るデータが多すぎます。' + (message || '');
     }
+    if (code === 'upstream_error' || code === 'upstream_unreachable') {
+      if (/PGRST205|schema cache/i.test(message)) {
+        return 'テーブル juki_records がまだありません。Supabase の SQL Editor で準備用のSQLを実行してください。';
+      }
+      return 'データの保管先に接続できません。保管先が停止している可能性があります。事務所へご連絡ください。';
+    }
+    if (res && res.status === 405) return 'この操作は許可されていません。';
+    if (res && res.status === 429) return 'アクセスが集中しています。しばらくしてからお試しください。';
     if (res && res.status) {
       return 'サーバーエラー（' + res.status + '）' + (message ? '：' + message : '');
     }
-    // 端末は通信できているのに届かない場合は、保管先(Supabase)側の停止が疑わしい
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-      return '端末が通信できていません。電波の状態をご確認ください。'
-        + '（点検の記録は端末に保存され、つながった時点で自動送信されます）';
+      return '端末が通信できていません。電波の状態をご確認ください。' +
+        '（点検の記録は端末に保存され、つながった時点で自動送信されます）';
     }
-    return 'データの保管先に接続できません。保管先が停止しているか、URLが変わった可能性があります。'
-      + '事務所へご連絡ください。（点検の記録は端末に保存されています）';
+    return 'サーバーに接続できません。しばらくしてからお試しください。' +
+      '（点検の記録は端末に保存されています）';
   }
 
   function failWith(r) {
-    return r.text().then(function (t) { throw new Error(describeError(r, t)); });
+    return r.text().then(function (t) {
+      var err = new Error(describeError(r, t));
+      err.status = r.status;
+      try { err.code = JSON.parse(t).error; } catch (e) { err.code = ''; }
+      throw err;
+    });
+  }
+
+  /** 証明切れなら取り直して一度だけやり直す */
+  function apiFetch(path, options, retried) {
+    return fetch(api(path), options).then(function (r) {
+      if (r.status === 401 && !retried) {
+        return failWith(r)['catch'](function (e) {
+          if (e.code !== 'no_session' && e.code !== 'turnstile_required') throw e;
+          return ensureSession().then(function () { return apiFetch(path, options, true); });
+        });
+      }
+      if (!r.ok) return failWith(r);
+      return r;
+    });
   }
 
   /* ---------------- サーバーから取得 ---------------- */
-  function pull(c) {
-    var url = c.url + '/rest/v1/' + TABLE +
-      '?select=id,kind,data,deleted,updated_at' +
-      '&space=eq.' + encodeURIComponent(c.space) +
-      '&updated_at=gt.' + encodeURIComponent(cursor()) +
-      '&order=updated_at.asc&limit=2000';
-    return fetch(url, { headers: headers(c) })
-      .then(function (r) {
-        if (!r.ok) return failWith(r);
-        return r.json();
-      })
-      .then(function (rows) {
-        if (!rows.length) return 0;
-        var bundle = { sites: [], machines: [], inspections: [] };
-        var maxAt = cursor();
-        rows.forEach(function (row) {
-          if (row.updated_at > maxAt) maxAt = row.updated_at;
-          if (!bundle[row.kind]) return;
-          var rec = row.data || {};
-          rec.id = row.id;
-          rec.deleted = !!row.deleted;
-          bundle[row.kind].push(rec);
-        });
-        var changed = Store.mergeAll(bundle, false);
-        setCursor(maxAt);
-        return changed;
-      })
-      .catch(function (e) {
-        // 通信自体に失敗した場合（圏外など）は分かりやすい文言に置き換える
-        var m = (e && e.message) || '';
-        if (!m || /Failed to fetch|NetworkError|Load failed/i.test(m)) {
-          throw new Error(describeError(null, ''));
-        }
-        throw e;
+  function pull() {
+    return apiFetch('/api/records?since=' + encodeURIComponent(cursor()), {
+      method: 'GET',
+      credentials: 'same-origin',
+      headers: { 'accept': 'application/json' }
+    }).then(function (r) {
+      return r.json();
+    }).then(function (body) {
+      var rows = (body && body.rows) || [];
+      if (!rows.length) return 0;
+      var bundle = { sites: [], machines: [], inspections: [] };
+      var maxAt = cursor();
+      rows.forEach(function (row) {
+        if (row.updated_at > maxAt) maxAt = row.updated_at;
+        // 継承経由の一致（'__proto__' など）を弾くため、自身の項目かを確かめる
+        if (!Object.prototype.hasOwnProperty.call(bundle, row.kind)) return;
+        var rec = row.data || {};
+        rec.id = row.id;
+        rec.deleted = !!row.deleted;
+        bundle[row.kind].push(rec);
       });
+      var changed = Store.mergeAll(bundle, false);
+      setCursor(maxAt);
+      return changed;
+    });
   }
 
   /* ---------------- サーバーへ送信 ---------------- */
-  function push(c) {
+  function push() {
     var pending = Store.pendingRecords();
     if (!pending.length) return Promise.resolve(0);
+    // 上限を超える分は次の巡回で送る
+    if (pending.length > MAX_PUSH) pending = pending.slice(0, MAX_PUSH);
 
     var rows = pending.map(function (p) {
       var data = {};
       Object.keys(p.record).forEach(function (k) {
         if (k !== '_dirty') data[k] = p.record[k];
       });
-      return {
-        id: p.record.id,
-        space: c.space,
-        kind: p.kind,
-        data: data,
-        deleted: !!p.record.deleted
-      };
+      return { id: p.record.id, kind: p.kind, data: data, deleted: !!p.record.deleted };
     });
 
-    return fetch(c.url + '/rest/v1/' + TABLE, {
+    return apiFetch('/api/records', {
       method: 'POST',
-      headers: headers(c, { Prefer: 'resolution=merge-duplicates,return=minimal' }),
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify(rows)
-    }).then(function (r) {
-      if (!r.ok) return failWith(r);
+    }).then(function () {
       Store.markSynced(rows.map(function (x) { return x.id; }));
       return rows.length;
     });
@@ -213,10 +286,9 @@
     status.enabled = true;
     notify(0);
 
-    var c = config();
-    return pull(c)
+    return pull()
       .then(function (changed) {
-        return push(c).then(function () { return changed; });
+        return push().then(function () { return changed; });
       })
       .then(function (changed) {
         status.lastSyncAt = new Date().toISOString();
@@ -225,9 +297,7 @@
         status.running = false;
         notify(changed);
         return changed;
-      })
-      .catch(function (e) {
-        // 送信側で通信に失敗した場合も分かりやすい文言にそろえる
+      })['catch'](function (e) {
         var m = (e && e.message) || '';
         status.lastError = (!m || /Failed to fetch|NetworkError|Load failed/i.test(m))
           ? describeError(null, '') : m;
@@ -260,20 +330,17 @@
     timer = null;
   }
 
-  /** 同期状態が変わったとき（引数：status, 取り込んだ件数） */
   function onStatus(cb) { listeners.push(cb); }
 
-  /** 接続テスト。設定画面から使う */
-  function test(url, key, space) {
-    var c = { url: normalizeUrl(url), key: (key || '').trim(), space: space || 'default' };
-    if (!c.url || !c.key) return Promise.reject(new Error('URLとキーの両方を入力してください'));
-    return fetch(c.url + '/rest/v1/' + TABLE + '?select=id&limit=1&space=eq.' + encodeURIComponent(c.space), {
-      headers: headers(c)
+  /** サーバー側の設定状況を調べる（鍵そのものは返ってこない） */
+  function test() {
+    return fetch(api('/api/session'), {
+      method: 'GET',
+      credentials: 'same-origin',
+      headers: { 'accept': 'application/json' }
     }).then(function (r) {
       if (!r.ok) return failWith(r);
-      return true;
-    }, function () {
-      throw new Error(describeError(null, ''));
+      return r.json();
     });
   }
 
@@ -296,7 +363,6 @@
     },
     isActive: isActive,
     isConfigured: isConfigured,
-    normalizeUrl: normalizeUrl,
     test: test
   };
 })(window);
