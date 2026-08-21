@@ -1,0 +1,17 @@
+{
+  // マル点（重機日常点検アプリ）
+  // 画面（静的ファイル）とサーバー処理を、ひとつのWorkerで動かす設定。
+  // name は Cloudflare 上の既存Workerと一致させること（変えると別のURLになります）
+  "name": "owarigumi-juki-tenken",
+  "compatibility_date": "2026-08-20",
+  "main": "worker.js",
+  "assets": {
+    "directory": "./",
+    "binding": "ASSETS",
+    // /api/ で始まる要求は、静的ファイルより先に worker.js が受け取る
+    "run_worker_first": ["/api/*"]
+  },
+  "observability": {
+    "enabled": true
+  }
+}
