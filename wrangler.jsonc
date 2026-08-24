@@ -5,6 +5,12 @@
   "name": "owarigumi-juki-tenken",
   "compatibility_date": "2026-08-20",
   "main": "worker.js",
+  // 秘密ではない設定。ここに書くと再デプロイで消えません。
+  // SUPABASE_SERVICE_KEY だけは画面から Secret として登録します。
+  "vars": {
+    "SUPABASE_URL": "https://kxfjojymrkajrqiqdnth.supabase.co",
+    "SPACE": "default"
+  },
   "assets": {
     "directory": "./",
     "binding": "ASSETS",
