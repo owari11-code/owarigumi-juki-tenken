@@ -54,11 +54,17 @@ export async function onRequestPost({ request, env }) {
   return json({ ok: true, session: true }, 200, { 'set-cookie': sessionCookieHeader(value) });
 }
 
-/** 設定状況の確認用（鍵そのものは返さない） */
+/** 設定状況の確認用（鍵そのものは返さない。設定済みかどうかだけ） */
 export async function onRequestGet({ env }) {
   return json({
     session: !!env.SESSION_SECRET,
     turnstile: !!env.TURNSTILE_SECRET,
-    database: !!(env.SUPABASE_URL && env.SUPABASE_SERVICE_KEY)
+    database: !!(env.SUPABASE_URL && env.SUPABASE_SERVICE_KEY),
+    // どちらが足りないのか分かるように、項目ごとの有無も返す
+    detail: {
+      SUPABASE_URL: !!env.SUPABASE_URL,
+      SUPABASE_SERVICE_KEY: !!env.SUPABASE_SERVICE_KEY,
+      SPACE: env.SPACE || '(未設定→defaultを使用)'
+    }
   });
 }
