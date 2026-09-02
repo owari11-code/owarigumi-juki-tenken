@@ -1259,7 +1259,7 @@
 
     /* 元請確認（日ごと）。アプリで現場代理人が確認した日は氏名が入り、
        未確認の日は空欄のまま出るので、紙に署名・押印してもよい。 */
-    grid += '<tr><th class="i-label">元請確認（現場代理人）</th>';
+    grid += '<tr><th class="i-label">元　請　確　認</th>';
     for (d = 1; d <= days; d++) {
       var who = '';
       recsOn(d).forEach(function (r) {
