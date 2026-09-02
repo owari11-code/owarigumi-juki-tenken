@@ -56,6 +56,16 @@ export async function onRequestPost({ request, env }) {
 
 /** 設定状況の確認用（鍵そのものは返さない。設定済みかどうかだけ） */
 export async function onRequestGet({ env }) {
+  /* 設定の取り違えを切り分けるため、届いている「名前」だけを並べる。
+     値も長さも出さないので、鍵が漏れることはない。
+     ASSETS のような仕組み上の項目は除く。 */
+  const names = [];
+  for (const key in env) {
+    if (key === 'ASSETS') continue;
+    names.push(key);
+  }
+  names.sort();
+
   return json({
     session: !!env.SESSION_SECRET,
     turnstile: !!env.TURNSTILE_SECRET,
@@ -65,6 +75,8 @@ export async function onRequestGet({ env }) {
       SUPABASE_URL: !!env.SUPABASE_URL,
       SUPABASE_SERVICE_KEY: !!env.SUPABASE_SERVICE_KEY,
       SPACE: env.SPACE || '(未設定→defaultを使用)'
-    }
+    },
+    // アプリに届いている設定の名前（値は出しません）
+    received: names
   });
 }
