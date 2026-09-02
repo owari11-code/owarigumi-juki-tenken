@@ -10,7 +10,7 @@
 window.APP_CONFIG = {
   /* QRコードに埋め込むURL。空欄なら「いま開いているURL」を使います。
      例: 'https://maruten.pages.dev/' */
-  baseUrl: '',
+    baseUrl: 'https://owarigumi-juki-tenken.owari11.workers.dev/',
 
   /* データのやり取り先。通常は空欄のまま（同じドメインの /api を使います）。
      別ドメインのCloudflareに置く場合だけ 'https://〇〇.pages.dev' の形で指定します。 */
