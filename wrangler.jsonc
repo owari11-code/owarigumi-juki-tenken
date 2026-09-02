@@ -5,6 +5,8 @@
   "name": "owarigumi-juki-tenken",
   "compatibility_date": "2026-08-20",
   "main": "worker.js",
+  // 画面から登録した鍵（Secret）を、再デプロイのときに消さない
+  "keep_vars": true,
   // 秘密ではない設定。ここに書くと再デプロイで消えません。
   // SUPABASE_SERVICE_KEY だけは画面から Secret として登録します。
   "vars": {
