@@ -539,6 +539,49 @@ table.data.two-up .i-res { width: 18%; }
 .approve-done { flex: 1; font-size: 13.5px; }
 .approve-done .muted { font-size: 11.5px; }
 
+/* ------------------------------------------------------------------ *
+ * 月間点検表（1台・1か月＝1枚）
+ * 縦＝点検項目／横＝1日〜末日のマス目。
+ * 用紙の向きは指定していない。A4の縦・横どちらでも収まる寸法にしてある。
+ * ------------------------------------------------------------------ */
+.month-doc { background: #fff; color: #000; }
+.month-doc .doc-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; border-bottom: 2px solid #000; padding-bottom: 6px; margin-bottom: 8px; }
+.month-doc .doc-title { font-size: 18px; font-weight: 700; }
+.month-doc .doc-sub { font-size: 13px; }
+.month-doc .meta { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 8px; }
+.month-doc .meta th, .month-doc .meta td { border: 1px solid #666; padding: 3px 6px; text-align: left; }
+.month-doc .meta th { background: #eee; white-space: nowrap; width: 84px; }
+.month-doc .approval { border-collapse: collapse; font-size: 11px; flex: none; }
+.month-doc .approval th, .month-doc .approval td { border: 1px solid #666; text-align: center; padding: 2px 4px; }
+.month-doc .approval th { background: #eee; font-weight: 400; white-space: nowrap; }
+.month-doc .approval td { width: 26mm; height: 16mm; vertical-align: middle; }
+.month-doc .approval .ap-name { display: block; font-size: 12px; }
+.month-doc .approval .ap-date { display: block; font-size: 10px; color: #444; }
+
+.month-grid { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 11px; }
+.month-grid th, .month-grid td { border: 1px solid #666; padding: 0; text-align: center; vertical-align: middle; }
+.month-grid th.i-label { width: 30%; text-align: left; padding: 2px 5px; font-weight: 400; line-height: 1.25; background: #fff; }
+.month-grid thead th { background: #eee; font-weight: 700; }
+.month-grid thead th.i-label { font-weight: 700; background: #eee; }
+.month-grid .sec-row th { background: #dde4ec; text-align: left; padding: 2px 5px; font-weight: 700; }
+.month-grid th.sat, .month-grid td.sat { background: #eef3f8; }
+.month-grid th.sun, .month-grid td.sun { background: #faeeee; }
+.month-grid .mk { font-size: 12px; line-height: 1.4; }
+.month-grid .mk.ng { color: #c62828; font-weight: 700; }
+.month-grid .mk.na { color: #666; }
+/* 点検者名・アワーメータは桁数が入らないため縦書きにする */
+.month-grid td.vtext { writing-mode: vertical-rl; text-orientation: upright; font-size: 9px; padding: 2px 0; white-space: nowrap; overflow: hidden; }
+.month-grid td.vtext.hm { height: 16mm; }
+.month-grid td.vtext.who { height: 26mm; }
+
+.month-doc .legend { font-size: 11px; margin: 5px 0 0; color: #333; }
+.month-doc h3 { font-size: 13px; margin: 10px 0 4px; }
+.month-doc .note-list { margin: 0; padding-left: 1.3em; font-size: 12px; line-height: 1.6; }
+.month-doc .note-empty { font-size: 12px; border: 1px solid #666; padding: 4px 6px; }
+
+.month-page { page-break-after: always; break-after: page; }
+.month-page:last-child { page-break-after: auto; break-after: auto; }
+
 @media print {
   .no-print, .app-header, .toast { display: none !important; }
   body { background: #fff; font-size: 11pt; color: #000; }
@@ -565,6 +608,33 @@ table.data.two-up .i-res { width: 18%; }
   .record-doc.compact table.data td { padding: 2px 5px; line-height: 1.35; }
   .record-doc.compact .approval td { height: 13mm; width: 24mm; }
   .record-doc.compact { page-break-inside: avoid; break-inside: avoid; }
+
+  /* 月間点検表：1台＝A4・1ページに収めるための詰め */
+  .month-doc .doc-title { font-size: 14pt; }
+  .month-doc .doc-head { padding-bottom: 4px; margin-bottom: 5px; }
+  .month-doc .meta { font-size: 8pt; margin-bottom: 5px; }
+  .month-doc .meta th, .month-doc .meta td { padding: 1.5px 4px; }
+  .month-doc .approval { font-size: 8pt; }
+  .month-doc .approval td { width: 22mm; height: 12mm; }
+  .month-doc .approval th,
+  .month-grid thead th,
+  .month-grid .sec-row th,
+  .month-grid th.sat, .month-grid td.sat,
+  .month-grid th.sun, .month-grid td.sun {
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  .month-grid { font-size: 6pt; }
+  .month-grid thead th { font-size: 5.5pt; }
+  .month-grid th.i-label { padding: 0.8px 3px; line-height: 1.2; }
+  .month-grid .sec-row th { padding: 0.8px 3px; font-size: 6pt; }
+  .month-grid .mk { font-size: 7pt; line-height: 1.2; }
+  .month-grid td.vtext { font-size: 5.5pt; }
+  .month-grid td.vtext.hm { height: 10mm; }
+  .month-grid td.vtext.who { height: 20mm; }
+  .month-doc .legend { font-size: 7pt; }
+  .month-doc h3 { font-size: 8.5pt; margin: 6px 0 2px; }
+  .month-doc .note-list, .month-doc .note-empty { font-size: 7.5pt; line-height: 1.4; }
+  .month-page { page-break-inside: avoid; break-inside: avoid; }
 
   @page { margin: 10mm; }
 }
