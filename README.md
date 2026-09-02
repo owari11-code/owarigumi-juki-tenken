@@ -254,3 +254,4 @@ GitHub の **Settings → Secrets and variables → Actions** に登録します
 
 iOS Safari / Android Chrome / Windows の Edge・Chrome（いずれも最近のバージョン）。
 QRコードの生成は自前実装で、バージョン1〜40・誤り訂正L/M/Q/Hに対応しています。
+
