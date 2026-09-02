@@ -19,7 +19,7 @@ window.APP_CONFIG = {
   /* Cloudflare Turnstile の Site Key（公開してよい値）。
      設定すると、自動化された不正アクセスを遮断できます。
      空欄なら確認なしで動きます（社内限定の試用時など）。 */
-  turnstileSiteKey: '',
+    turnstileSiteKey: '0x4AAAA...',
 
   /* 会社名（帳票の表示用） */
   company: '株式会社尾割組'
