@@ -569,10 +569,9 @@ table.data.two-up .i-res { width: 18%; }
 .month-grid .mk { font-size: 12px; line-height: 1.4; }
 .month-grid .mk.ng { color: #c62828; font-weight: 700; }
 .month-grid .mk.na { color: #666; }
-/* 点検者名・アワーメータは桁数が入らないため縦書きにする */
+/* 点検者名・元請確認の氏名は横幅に入らないため縦書きにする */
 .month-grid td.vtext { writing-mode: vertical-rl; text-orientation: upright; font-size: 9px; padding: 2px 0; white-space: nowrap; overflow: hidden; }
-.month-grid td.vtext.hm { height: 16mm; }
-.month-grid td.vtext.who { height: 26mm; }
+.month-grid td.vtext.who { height: 26mm; }   /* 点検者が交代した日は氏名が2つ入る */
 
 .month-doc .legend { font-size: 11px; margin: 5px 0 0; color: #333; }
 .month-doc h3 { font-size: 13px; margin: 10px 0 4px; }
@@ -629,7 +628,6 @@ table.data.two-up .i-res { width: 18%; }
   .month-grid .sec-row th { padding: 0.8px 3px; font-size: 6pt; }
   .month-grid .mk { font-size: 7pt; line-height: 1.2; }
   .month-grid td.vtext { font-size: 5.5pt; }
-  .month-grid td.vtext.hm { height: 10mm; }
   .month-grid td.vtext.who { height: 20mm; }
   .month-doc .legend { font-size: 7pt; }
   .month-doc h3 { font-size: 8.5pt; margin: 6px 0 2px; }
