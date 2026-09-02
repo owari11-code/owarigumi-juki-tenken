@@ -578,7 +578,6 @@
       field('時刻', '<input type="time" id="f-time" value="' + nowTimeStr() + '">') +
       '</div>' +
       field('点検者氏名', '<input type="text" id="f-inspector" value="' + esc(lastInspector()) + '">', true) +
-      field('アワーメータ（h）', '<input type="number" id="f-hour" inputmode="decimal" step="0.1" placeholder="任意">') +
       '</div>';
 
     var itemNo = 0;
@@ -692,7 +691,6 @@
         date: date,
         time: val('#f-time'),
         inspector: inspector,
-        hourMeter: val('#f-hour'),
         results: results,
         ngNote: val('#f-ngnote'),
         action: val('#f-action'),
@@ -853,7 +851,7 @@
       '<tr><th>工事名</th><td colspan="3">' + esc(rec.siteName || (site ? site.name : '')) +
       (contractNo ? '（工事番号：' + esc(contractNo) + '）' : '') + '</td></tr>' +
       '<tr><th>機械名</th><td>' + esc(rec.machineName) + '</td><th>機種</th><td>' + esc(D.machineTypeName(rec.machineType)) + '</td></tr>' +
-      '<tr><th>機番</th><td>' + esc(rec.serial || '－') + '</td><th>アワーメータ</th><td>' + esc(rec.hourMeter ? rec.hourMeter + ' h' : '－') + '</td></tr>' +
+      '<tr><th>機番</th><td colspan="3">' + esc(rec.serial || '－') + '</td></tr>' +
       '<tr><th>点検日時</th><td>' + esc(formatDate(rec.date) + ' ' + (rec.time || '')) + '</td><th>点検者</th><td>' + esc(rec.inspector || '') + '</td></tr>' +
       '<tr><th>判定</th><td colspan="3">' + (rec.judgement === 'ng' ? '要整備（不具合あり）' : '良（異常なし）') + '</td></tr>' +
       '</tbody></table>';
@@ -1233,17 +1231,8 @@
       });
     });
 
-    /* ---- 下段：アワーメータ・点検者・判定 ---- */
+    /* ---- 下段：点検者・判定・元請確認 ---- */
     grid += '<tr class="sec-row"><th colspan="' + (days + 1) + '">記録・確認</th></tr>';
-
-    grid += '<tr><th class="i-label">アワーメータ（h）</th>';
-    for (d = 1; d <= days; d++) {
-      var hours = [];
-      recsOn(d).forEach(function (r) { if (r.hourMeter) hours.push(String(r.hourMeter)); });
-      grid += '<td class="i-day vtext hm' + dayClass(ym, d) + '">' +
-        (hours.length ? esc(hours[hours.length - 1]) : '') + '</td>';
-    }
-    grid += '</tr>';
 
     grid += '<tr><th class="i-label">点　検　者</th>';
     for (d = 1; d <= days; d++) {
@@ -1265,6 +1254,19 @@
         mark = ng ? '<span class="mk ng">×</span>' : '<span class="mk">○</span>';
       }
       grid += '<td class="i-day' + dayClass(ym, d) + '">' + mark + '</td>';
+    }
+    grid += '</tr>';
+
+    /* 元請確認（日ごと）。アプリで現場代理人が確認した日は氏名が入り、
+       未確認の日は空欄のまま出るので、紙に署名・押印してもよい。 */
+    grid += '<tr><th class="i-label">元請確認（現場代理人）</th>';
+    for (d = 1; d <= days; d++) {
+      var who = '';
+      recsOn(d).forEach(function (r) {
+        var a = approvalOf(r, 'manager');   // APPROVAL_ROLES の「現場代理人」
+        if (!who && a && a.name) who = a.name;
+      });
+      grid += '<td class="i-day vtext who' + dayClass(ym, d) + '">' + esc(who) + '</td>';
     }
     grid += '</tr>';
 
