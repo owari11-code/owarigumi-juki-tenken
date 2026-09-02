@@ -12,7 +12,7 @@
  *   #/record/<id>          点検記録の詳細
  *   #/records?site=&machine=  点検記録の一覧
  *   #/print/labels?site=&machine=  QRラベル印刷
- *   #/print/records?site=&machine=&from=&to=  点検記録の印刷(PDF)
+ *   #/print/month?site=&machine=&ym=       月間点検表の印刷(PDF)
  *   #/settings             設定・バックアップ
  *   #i=<データ>            QRコードからの入口
  */
@@ -392,6 +392,10 @@
       '<a class="btn secondary" href="#/records?site=' + encodeURIComponent(site.id) + '">点検記録を見る</a>' +
       '</div>' +
       '<div class="btn-row">' +
+      '<a class="btn secondary" href="#/print/month?site=' + encodeURIComponent(site.id) +
+      '&ym=' + encodeURIComponent(thisMonth()) + '">今月の点検表を印刷（全重機）</a>' +
+      '</div>' +
+      '<div class="btn-row">' +
       '<a class="btn plain" href="#/site/' + encodeURIComponent(site.id) + '/edit">現場情報を編集</a>' +
       '</div>' +
       // 重機が多い現場では画面が長くなるため、下にも戻る導線を置く
@@ -520,9 +524,12 @@
         '</div>';
     }
 
+    html += monthSheetCardHtml({ machineId: machine.id });
+
     html += '<div class="btn-row"><a class="btn plain" href="#/machine/' + encodeURIComponent(machine.id) + '/edit">重機情報を編集</a></div>';
 
     app.innerHTML = html;
+    bindMonthSheetCard('machine=' + encodeURIComponent(machine.id));
     drawQr(qs('#qr'), url, 260);
   }
 
@@ -722,7 +729,9 @@
     html += approvalFormHtml(rec);
     html +=
       '<div class="btn-row">' +
-      '<a class="btn" href="#/print/records?record=' + encodeURIComponent(rec.id) + '">この記録を印刷／PDF保存</a>' +
+      '<a class="btn" href="#/print/month?machine=' + encodeURIComponent(rec.machineId) +
+      '&ym=' + encodeURIComponent((rec.date || '').slice(0, 7)) +
+      '">この月の点検表を印刷／PDF保存</a>' +
       '</div>' +
       '<div class="btn-row">' +
       '<a class="btn plain" href="#/machine/' + encodeURIComponent(rec.machineId) + '">重機のページへ</a>' +
@@ -940,7 +949,7 @@
 
     html += '<p class="muted">' + recs.length + ' 件</p>';
     if (recs.length) {
-      html += '<div class="btn-row"><a class="btn" id="b-print">この一覧をまとめて印刷／PDF保存</a></div>';
+      html += monthSheetCardHtml({ siteId: siteId || undefined, machineId: machineId || undefined });
       html += '<ul class="list">';
       recs.forEach(function (r) {
         html += '<li>' + rowLink('#/record/' + encodeURIComponent(r.id), {
@@ -973,9 +982,9 @@
 
     qs('#b-filter').onclick = function () { go(buildQuery('#/records')); };
     qs('#b-clear').onclick = function () { go(siteId ? '#/records?site=' + encodeURIComponent(siteId) : '#/records'); };
-    if (qs('#b-print')) {
-      qs('#b-print').onclick = function () { go(buildQuery('#/print/records')); };
-    }
+    bindMonthSheetCard(machineId
+      ? 'machine=' + encodeURIComponent(machineId)
+      : 'site=' + encodeURIComponent(siteId));
   }
 
   /* ------------------------------------------------------------------ *
@@ -1039,40 +1048,297 @@
   }
 
   /* ------------------------------------------------------------------ *
-   * 印刷：点検記録
+   * 印刷：月間点検表（1台・1か月＝1枚）
+   *
+   * 縦に点検項目、横に1日〜末日を並べたマス目の帳票。
+   * 建設業で広く使われている様式に合わせてある。
+   * 用紙の向きは指定しない（印刷画面で選べるようにするため）。
    * ------------------------------------------------------------------ */
-  function renderPrintRecords(params) {
-    var recs;
-    if (params.record) {
-      var r = Store.getInspection(params.record);
-      if (!r) return renderNotFound('点検記録が見つかりません。');
-      recs = [r];
-    } else {
-      recs = Store.listInspections({
-        siteId: params.site || undefined,
-        machineId: params.machine || undefined,
-        from: params.from || '',
-        to: params.to || ''
-      });
+
+  /** 'YYYY-MM' の日数 */
+  function daysInMonth(ym) {
+    var y = Number(ym.slice(0, 4));
+    var m = Number(ym.slice(5, 7));
+    if (!y || !m) return 31;
+    return new Date(y, m, 0).getDate();   // 翌月の0日＝当月の末日
+  }
+
+  function ymLabel(ym) {
+    return Number(ym.slice(0, 4)) + '年' + Number(ym.slice(5, 7)) + '月';
+  }
+
+  function thisMonth() {
+    var d = new Date();
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1);
+  }
+
+  function isYm(v) { return /^\d{4}-\d{2}$/.test(v || ''); }
+
+  /** 記録のある月を新しい順で返す */
+  function monthsWithRecords(filter) {
+    var seen = {};
+    var list = [];
+    Store.listInspections(filter).forEach(function (r) {
+      var ym = (r.date || '').slice(0, 7);
+      if (!isYm(ym)) return;
+      if (Object.prototype.hasOwnProperty.call(seen, ym)) return;
+      seen[ym] = true;
+      list.push(ym);
+    });
+    return list.sort().reverse();
+  }
+
+  /** 月を選ぶ〈select〉の中身。記録が無ければ今月だけ */
+  function monthOptionsHtml(filter, selected) {
+    var months = monthsWithRecords(filter);
+    if (!months.length) months = [thisMonth()];
+    if (selected && isYm(selected) && months.indexOf(selected) < 0) {
+      months.unshift(selected);
     }
-    if (!recs.length) return renderNotFound('該当する点検記録がありません。');
+    return months.map(function (m) {
+      return '<option value="' + esc(m) + '"' + (m === selected ? ' selected' : '') +
+        '>' + esc(ymLabel(m)) + '</option>';
+    }).join('');
+  }
+
+  /** 月間点検表を印刷する欄（重機ページ・現場ページで共用） */
+  function monthSheetCardHtml(filter) {
+    var months = monthsWithRecords(filter);
+    var sel = months.length ? months[0] : thisMonth();
+    return '<h2><span class="kicker">SHEET</span>月間点検表</h2>' +
+      '<div class="card">' +
+      field('対象の月', '<select id="f-ym">' + monthOptionsHtml(filter, sel) + '</select>') +
+      '<div class="btn-row"><button class="btn secondary" id="b-month">この月の点検表を印刷／PDF保存</button></div>' +
+      '<p class="muted">1か月分の点検結果を1枚にまとめた記録表です。' +
+      (months.length ? '' : '<br>まだ記録がないため、空欄の用紙が印刷されます。') +
+      '</p></div>';
+  }
+
+  /** 月間点検表の印刷欄に動きを付ける */
+  function bindMonthSheetCard(query) {
+    var btn = qs('#b-month');
+    if (!btn) return;
+    btn.onclick = function () {
+      go('#/print/month?' + query + '&ym=' + encodeURIComponent(val('#f-ym')));
+    };
+  }
+
+  /** マス目に入れる印。空欄＝その日は点検していない */
+  function markOf(v) {
+    if (v === 'ok') return '<span class="mk">○</span>';
+    if (v === 'ng') return '<span class="mk ng">×</span>';
+    if (v === 'na') return '<span class="mk na">／</span>';
+    return '';
+  }
+
+  /* 曜日の色分け（土＝薄青／日＝薄赤）。白黒印刷でも罫線で読める */
+  function dayClass(ym, d) {
+    var w = new Date(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)) - 1, d).getDay();
+    return w === 0 ? ' sun' : (w === 6 ? ' sat' : '');
+  }
+
+  /** 月間の確認欄。すべて確認済みなら氏名と最終確認日、途中なら件数を添える */
+  function monthApprovalHtml(recs) {
+    var cells = APPROVAL_ROLES.map(function (role) {
+      var done = [];
+      recs.forEach(function (r) {
+        var a = approvalOf(r, role.key);
+        if (a) done.push(a);
+      });
+      if (!done.length || !recs.length) return '<td></td>';
+      var last = done[done.length - 1];
+      var body = '<span class="ap-name">' + esc(last.name) + '</span>';
+      if (done.length === recs.length) {
+        body += '<span class="ap-date">' + esc(formatStamp(last.at).date) + '</span>';
+      } else {
+        body += '<span class="ap-date">' + done.length + '／' + recs.length + '件 確認済</span>';
+      }
+      return '<td>' + body + '</td>';
+    }).join('');
+    return '<table class="approval"><thead><tr>' +
+      APPROVAL_ROLES.map(function (r) { return '<th>' + esc(r.name) + '</th>'; }).join('') +
+      '</tr></thead><tbody><tr>' + cells + '</tr></tbody></table>';
+  }
+
+  /** 月間点検表1枚分のHTML */
+  function monthDocHtml(machine, ym) {
+    var site = Store.getSite(machine.siteId) || {};
+    var days = daysInMonth(ym);
+    var recs = Store.listInspections({
+      machineId: machine.id,
+      from: ym + '-01',
+      to: ym + '-' + pad(days)
+    });
+
+    // 「点検区分＋日」で記録を引けるようにする（同じ枠に複数あれば後の時刻が残る）
+    var byKey = {};
+    recs.forEach(function (r) {
+      byKey[r.phase + '|' + Number((r.date || '').slice(8, 10))] = r;
+    });
+    function recAt(phase, d) {
+      var k = phase + '|' + d;
+      return Object.prototype.hasOwnProperty.call(byKey, k) ? byKey[k] : null;
+    }
+    function recsOn(d) {
+      var out = [];
+      D.PHASES.forEach(function (ph) {
+        var r = recAt(ph.id, d);
+        if (r) out.push(r);
+      });
+      return out;
+    }
+
+    var contractNo = site.contractNo || '';
+    var html = '<div class="month-doc">';
+
+    html +=
+      '<div class="doc-head">' +
+      '<div><div class="doc-title">建設機械　日常点検記録表</div>' +
+      '<div class="doc-sub">' + esc(ymLabel(ym)) + '分</div></div>' +
+      monthApprovalHtml(recs) +
+      '</div>';
+
+    html += '<table class="meta"><tbody>' +
+      '<tr><th>工事名</th><td colspan="3">' + esc(site.name || '') +
+      (contractNo ? '（工事番号：' + esc(contractNo) + '）' : '') + '</td></tr>' +
+      '<tr><th>機械名</th><td>' + esc(machine.name) + '</td>' +
+      '<th>機種</th><td>' + esc(D.machineTypeName(machine.type)) + '</td></tr>' +
+      '<tr><th>機番</th><td>' + esc(machine.serial || '－') + '</td>' +
+      '<th>メーカー・型式</th><td>' +
+      esc(((machine.maker || '') + ' ' + (machine.model || '')).trim() || '－') + '</td></tr>' +
+      '</tbody></table>';
+
+    /* ---- マス目の本体 ---- */
+    var d;
+    var grid = '<div class="table-scroll"><table class="month-grid"><thead><tr>' +
+      '<th class="i-label">点　検　項　目</th>';
+    for (d = 1; d <= days; d++) {
+      grid += '<th class="i-day' + dayClass(ym, d) + '">' + d + '</th>';
+    }
+    grid += '</tr></thead><tbody>';
+
+    D.PHASES.forEach(function (ph) {
+      D.sectionsFor(ph.id, machine.type).forEach(function (sec) {
+        grid += '<tr class="sec-row"><th colspan="' + (days + 1) + '">' +
+          esc(ph.name) + '　―　' + esc(sec.title) + '</th></tr>';
+        sec.items.forEach(function (it) {
+          grid += '<tr><th class="i-label">' + esc(it.label) + '</th>';
+          for (d = 1; d <= days; d++) {
+            var r = recAt(ph.id, d);
+            var v = r && r.results ? r.results[it.id] : undefined;
+            grid += '<td class="i-day' + dayClass(ym, d) + '">' + markOf(v) + '</td>';
+          }
+          grid += '</tr>';
+        });
+      });
+    });
+
+    /* ---- 下段：アワーメータ・点検者・判定 ---- */
+    grid += '<tr class="sec-row"><th colspan="' + (days + 1) + '">記録・確認</th></tr>';
+
+    grid += '<tr><th class="i-label">アワーメータ（h）</th>';
+    for (d = 1; d <= days; d++) {
+      var hours = [];
+      recsOn(d).forEach(function (r) { if (r.hourMeter) hours.push(String(r.hourMeter)); });
+      grid += '<td class="i-day vtext hm' + dayClass(ym, d) + '">' +
+        (hours.length ? esc(hours[hours.length - 1]) : '') + '</td>';
+    }
+    grid += '</tr>';
+
+    grid += '<tr><th class="i-label">点　検　者</th>';
+    for (d = 1; d <= days; d++) {
+      var names = [];
+      recsOn(d).forEach(function (r) {
+        if (r.inspector && names.indexOf(r.inspector) < 0) names.push(r.inspector);
+      });
+      grid += '<td class="i-day vtext who' + dayClass(ym, d) + '">' + esc(names.join('／')) + '</td>';
+    }
+    grid += '</tr>';
+
+    grid += '<tr><th class="i-label">判　定</th>';
+    for (d = 1; d <= days; d++) {
+      var on = recsOn(d);
+      var mark = '';
+      if (on.length) {
+        var ng = false;
+        on.forEach(function (r) { if (r.judgement === 'ng') ng = true; });
+        mark = ng ? '<span class="mk ng">×</span>' : '<span class="mk">○</span>';
+      }
+      grid += '<td class="i-day' + dayClass(ym, d) + '">' + mark + '</td>';
+    }
+    grid += '</tr>';
+
+    grid += '</tbody></table></div>';
+    html += grid;
+
+    html += '<p class="legend">○＝良　　×＝要整備　　／＝該当なし　　空欄＝点検の記録なし</p>';
+
+    /* ---- 不具合と処置の記録 ---- */
+    var notes = [];
+    recs.forEach(function (r) {
+      if (r.judgement !== 'ng' && !r.ngNote && !r.action) return;
+      var line = '<strong>' + Number((r.date || '').slice(8, 10)) + '日</strong>　' +
+        esc(D.phaseName(r.phase));
+      if (r.ngNote) line += '　不具合：' + esc(r.ngNote).replace(/\n/g, ' ');
+      if (r.action) line += '　処置：' + esc(r.action).replace(/\n/g, ' ');
+      notes.push('<li>' + line + '</li>');
+    });
+    html += '<h3>不具合・処置の記録</h3>' +
+      (notes.length
+        ? '<ul class="note-list">' + notes.join('') + '</ul>'
+        : '<div class="note-empty">この月に記録された不具合はありません。</div>');
+
+    html += '</div>';
+    return html;
+  }
+
+  function renderPrintMonth(params) {
+    // 以前の「1日1枚」の印刷リンクから来た場合も、その月の表を出す
+    var machineId = params.machine || '';
+    var ym = params.ym || '';
+    if (params.record) {
+      var one = Store.getInspection(params.record);
+      if (one) {
+        machineId = one.machineId;
+        if (!ym) ym = (one.date || '').slice(0, 7);
+      }
+    }
+    if (!isYm(ym)) ym = thisMonth();
+
+    var machines, title, backTo;
+    if (machineId) {
+      var m = Store.getMachine(machineId);
+      if (!m) return renderNotFound('重機が見つかりません。');
+      machines = [m];
+      title = m.name;
+      backTo = '#/machine/' + encodeURIComponent(m.id);
+    } else {
+      var site = Store.getSite(params.site);
+      if (!site) return renderNotFound('現場が見つかりません。');
+      machines = Store.listMachines(site.id);
+      title = site.name;
+      backTo = '#/site/' + encodeURIComponent(site.id);
+      if (!machines.length) return renderNotFound('この現場には重機が登録されていません。');
+    }
 
     var html =
-      pageHead('PRINT', '点検記録の印刷').replace('page-head', 'page-head no-print') +
+      '<div class="no-print">' + backLink(backTo, '戻る') + '</div>' +
+      pageHead('SHEET', '月間点検表　' + ymLabel(ym)).replace('page-head', 'page-head no-print') +
       '<div class="btn-row no-print">' +
       '<button class="btn" id="b-print">印刷する（PDF保存も可）</button>' +
-      '<button class="btn plain" id="b-back">戻る</button>' +
       '</div>' +
-      '<p class="muted no-print">印刷ダイアログで「送信先／プリンター」を<strong>「PDFに保存」</strong>にすると、PDFファイルとして保存できます（' + recs.length + '件・1件1ページ）。</p>' +
+      '<p class="muted no-print">' + esc(title) + '／' + esc(ymLabel(ym)) + '分・' +
+      machines.length + '枚（1台につき1枚）。<br>' +
+      '印刷ダイアログで「送信先／プリンター」を<strong>「PDFに保存」</strong>にすると、PDFとして保存できます。' +
+      '用紙の向きは印刷ダイアログで選べます（縦・横どちらでも収まります）。</p>' +
       '<div class="print-sheet">';
-    recs.forEach(function (r) {
-      html += '<div class="record-page">' + recordDocHtml(r, true) + '</div>';
+    machines.forEach(function (m) {
+      html += '<div class="month-page">' + monthDocHtml(m, ym) + '</div>';
     });
     html += '</div>';
 
     app.innerHTML = html;
     qs('#b-print').onclick = function () { window.print(); };
-    qs('#b-back').onclick = function () { history.back(); };
   }
 
   /* ------------------------------------------------------------------ *
@@ -1552,7 +1818,9 @@
 
       case 'print':
         if (p[1] === 'labels') return renderPrintLabels(r.params);
-        if (p[1] === 'records') return renderPrintRecords(r.params);
+        if (p[1] === 'month') return renderPrintMonth(r.params);
+        // 以前の「1日1枚」のリンクも、その月の表に読み替える
+        if (p[1] === 'records') return renderPrintMonth(r.params);
         return renderNotFound();
 
       case 'scan':
