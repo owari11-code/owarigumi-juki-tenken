@@ -51,6 +51,38 @@ alter table public.maruten_setup enable row level security;
 revoke all on table public.maruten_users from anon, authenticated;
 revoke all on table public.maruten_setup from anon, authenticated;
 
+-- ---------------------------------------------------------------------
+-- 記録の置き場（既にあるときは何もしません。新しいSupabaseに移したとき用）
+-- ---------------------------------------------------------------------
+create table if not exists public.juki_records (
+  id         text primary key,
+  space      text not null default 'default',
+  kind       text not null,
+  data       jsonb not null default '{}'::jsonb,
+  deleted    boolean not null default false,
+  updated_at timestamptz not null default now()
+);
+
+-- 追加・変更のたびに、データベース側の時刻を打ち直す（差分の取りこぼしを防ぐ）
+create or replace function public.juki_records_touch()
+returns trigger
+language plpgsql
+set search_path = pg_catalog, pg_temp
+as $$
+begin
+  new.updated_at := now();
+  return new;
+end;
+$$;
+
+drop trigger if exists juki_records_touch_trg on public.juki_records;
+create trigger juki_records_touch_trg
+  before insert or update on public.juki_records
+  for each row execute function public.juki_records_touch();
+
+alter table public.juki_records enable row level security;
+revoke all on table public.juki_records from anon, authenticated;
+
 -- 現場ごとの読み出しを速くする（記録が増えても遅くならないように）
 create index if not exists juki_records_kind_idx
   on public.juki_records (space, kind, updated_at);

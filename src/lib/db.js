@@ -169,6 +169,10 @@ export function dbFailure(e) {
   if (e && e.status === 0) {
     return { status: 502, code: 'upstream_unreachable', message: 'データの保管先に接続できませんでした。保管先が停止している可能性があります。' };
   }
+  // Cloudflare から保管先の名前が引けない／つながらない（Supabase を止めると起きる）
+  if ((e && e.status >= 520 && e.status <= 599) || /error code:\s*1\d{3}|Origin DNS error/i.test(detail)) {
+    return { status: 502, code: 'upstream_unreachable', message: 'データの保管先（Supabase）に接続できません。停止している可能性があります。管理画面で Restore（再開）してください。' };
+  }
   if (/PGRST202|Could not find the function/i.test(detail)) {
     return { status: 503, code: 'db_not_ready', message: 'データベースの準備（SQL）がまだ実行されていません。' };
   }
