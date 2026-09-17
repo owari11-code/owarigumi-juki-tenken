@@ -5,9 +5,13 @@ import { json, fail } from '../lib/http.js';
 import { safeEqual } from '../lib/crypto.js';
 import { configured, selectPage, dbFailure } from '../lib/db.js';
 
+/* 公開した版の目印。中身を直したら、ここも新しくする（どの版が動いているか分かるように） */
+export const VERSION = '2026-09-18-2';
+
 /* GET /api/status  … 設定済みかどうかだけを返す（値は一切返さない） */
 export async function status({ env }) {
   return json({
+    version: VERSION,
     database: configured(env),
     session: !!env.SESSION_SECRET,
     turnstile: !!env.TURNSTILE_SECRET,
