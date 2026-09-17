@@ -15,7 +15,7 @@ jobs:
     steps:
       - name: 稼働を確認する
         env:
-          APP_URL: ${{ secrets.APP_URL }}                 # 例: https://maruten.pages.dev
+          APP_URL: ${{ secrets.APP_URL }}                 # 例: https://owarigumi-juki-tenken.owari11.workers.dev
           KEEPALIVE_TOKEN: ${{ secrets.KEEPALIVE_TOKEN }} # Cloudflareの環境変数と同じ値
         run: |
           set -u
@@ -35,7 +35,7 @@ jobs:
             200)
               echo "正常です。データベースは稼働しています。" ;;
             000)
-              echo "::error::サイトに接続できません。Cloudflare Pages の状態を確認してください。"
+              echo "::error::サイトに接続できません。Cloudflare の Worker の状態を確認してください。"
               exit 1 ;;
             403)
               echo "::error::合言葉が一致しません。GitHubのSecretとCloudflareの環境変数 KEEPALIVE_TOKEN を揃えてください。"
