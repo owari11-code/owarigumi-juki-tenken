@@ -166,6 +166,8 @@ export async function upsertRows(env, rows) {
 /** データベースの失敗を、画面に出してよい形に直す */
 export function dbFailure(e) {
   const detail = (e && e.detail) || '';
+  // Cloudflare のログにだけ残す（画面には出さない）。原因を後から追えるように
+  try { console.log('db error', (e && e.status) || 0, detail); } catch (err) { /* 無視 */ }
   if (e && e.status === 0) {
     return { status: 502, code: 'upstream_unreachable', message: 'データの保管先に接続できませんでした。保管先が停止している可能性があります。' };
   }
@@ -179,5 +181,27 @@ export function dbFailure(e) {
   if (/PGRST205|schema cache/i.test(detail)) {
     return { status: 503, code: 'db_not_ready', message: 'データの置き場（テーブル）が見つかりません。' };
   }
-  return { status: 502, code: 'upstream_error', message: 'データの保管先でエラーが発生しました。' };
+  // PostgreSQL のエラー番号（SQLSTATE）だけを添える。中身（値）は画面に出さない
+  const m = detail.match(/"code"\s*:\s*"([0-9A-Za-z]{5})"/);
+  const sqlstate = m ? m[1] : '';
+  const hint = SQLSTATE_HINT[sqlstate] || '';
+  return {
+    status: 502,
+    code: 'upstream_error',
+    message: 'データの保管先でエラーが発生しました。' + hint + (sqlstate ? '（番号 ' + sqlstate + '）' : '')
+  };
 }
+
+/* データベースのエラー番号を、読んで分かる言葉にする */
+const SQLSTATE_HINT = {
+  '42883': '暗号化の機能（pgcrypto）が見つかりません。準備用のSQLをもう一度実行してください。',
+  '42P01': '必要な表がありません。準備用のSQLを実行してください。',
+  '42501': 'データベースの権限が足りません。準備用のSQLをもう一度実行してください。',
+  '3F000': 'データベースの置き場（schema）が見つかりません。',
+  '23505': '同じものが既に登録されています。',
+  '23514': '入力がデータベースの決まりに合いません。',
+  '23502': '必要な項目が入っていません。',
+  '55P03': '混み合っています。少し待ってからもう一度お試しください。',
+  '57014': '処理が時間切れになりました。もう一度お試しください。',
+  '53300': 'データベースへの接続が上限に達しています。少し待ってからお試しください。'
+};
