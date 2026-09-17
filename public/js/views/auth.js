@@ -61,7 +61,11 @@
         var el = U.qs('#setup-link');
         if (el) el.innerHTML = '管理者がまだ登録されていません。<a href="#/setup">初期設定はこちら</a>';
       }
-    }, function () { /* 表示しないだけ */ });
+    }, function (e) {
+      // 保管先が止まっている等。何が起きているのか分かるように出す
+      var el = U.qs('#setup-link');
+      if (el) el.textContent = (e && e.message) || '';
+    });
 
     function submit() {
       var loginId = U.val('#f-login');
