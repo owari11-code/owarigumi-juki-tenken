@@ -990,6 +990,161 @@ tr.unsent td { background: var(--amber-bg); }
 .g-bar.late .g-done { background: var(--red); }
 .g-row.empty .g-name { color: var(--amber); }
 
+/* ---------- 工程表（ドラッグで編集する） ---------- */
+.ge {
+  display: flex;
+  align-items: flex-start;
+  border: 1px solid var(--divider);
+  background: var(--paper);
+  user-select: none;
+  -webkit-user-select: none;
+}
+.ge-side { flex: 0 0 148px; border-right: 1px solid var(--divider); }
+.ge-side-head {
+  height: var(--head-h, 24px);
+  display: flex;
+  align-items: flex-end;
+  padding: 0 6px 3px;
+  font-size: 11.5px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--divider);
+}
+.ge-name {
+  height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 6px;
+  border-bottom: 1px solid var(--hairline);
+  font-size: 12.5px;
+}
+.ge-name a { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ge-name b { flex: none; font-family: var(--font-num); font-weight: 700; color: var(--muted); }
+.ge-name b.ok { color: var(--accent); }
+.ge-name.new input {
+  flex: 1;
+  min-width: 0;
+  min-height: 26px;
+  padding: 3px 6px;
+  font-size: 12px;
+  border: 1px solid var(--divider);
+  background: #fff;
+  color: var(--text);
+}
+.ge-add {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.ge-scroll { flex: 1; min-width: 0; overflow-x: auto; overflow-y: hidden; }
+.ge-body { position: relative; }
+.ge-head { position: relative; border-bottom: 1px solid var(--divider); }
+.ge-m {
+  position: absolute;
+  top: 3px;
+  padding-left: 4px;
+  border-left: 1px solid var(--hairline);
+  font-family: var(--font-num);
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.ge-d {
+  position: absolute;
+  bottom: 2px;
+  font-family: var(--font-num);
+  font-size: 9.5px;
+  line-height: 1;
+  color: var(--faint);
+  text-align: center;
+}
+.ge-d.sun { color: var(--red); }
+.ge-d.sat { color: #3a6ea5; }
+.ge-lines { position: absolute; left: 0; right: 0; bottom: 0; pointer-events: none; }
+.ge-line { position: absolute; top: 0; bottom: 0; border-left: 1px solid var(--hairline); }
+.ge-today { position: absolute; top: 0; bottom: 0; border-left: 2px solid var(--red); opacity: .55; }
+.ge-track {
+  position: relative;
+  height: 34px;
+  border-bottom: 1px solid var(--hairline);
+  cursor: crosshair;
+  touch-action: pan-y;
+}
+.ge-track.new { background: repeating-linear-gradient(135deg, rgba(89, 128, 166, .06) 0 6px, transparent 6px 12px); }
+.ge-hint {
+  position: absolute;
+  left: 8px;
+  top: 9px;
+  font-size: 11.5px;
+  color: var(--faint);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.ge-bar {
+  position: absolute;
+  top: 5px;
+  height: 23px;
+  background: rgba(89, 128, 166, .2);
+  border: 1px solid var(--accent);
+  cursor: grab;
+}
+.ge-bar.late { border-color: var(--red); background: rgba(198, 40, 40, .12); }
+.ge-bar.temp { border-style: dashed; }
+.ge-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); opacity: .8; pointer-events: none; }
+.ge-bar.late .ge-fill { background: var(--red); }
+.ge-cap {
+  position: absolute;
+  left: 5px;
+  top: 0;
+  line-height: 21px;
+  font-family: var(--font-num);
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .45);
+  pointer-events: none;
+}
+.ge-cap.dark { color: var(--text); text-shadow: none; }
+.ge-h { position: absolute; top: 0; bottom: 0; width: 9px; z-index: 2; }
+.ge-h.h-l { left: -4px; cursor: ew-resize; }
+.ge-h.h-r { right: -4px; cursor: ew-resize; }
+.ge-h.h-p { width: 14px; margin-left: -7px; cursor: col-resize; }
+.ge-h.h-p::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  margin-top: -5px;
+  background: #fff;
+  border: 2px solid var(--accent);
+}
+.ge-bar.late .ge-h.h-p::after { border-color: var(--red); }
+.ge-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 8px; }
+.ge-zoom { font-size: 12px; color: var(--muted); }
+.ge-z {
+  min-width: 36px;
+  height: 28px;
+  margin-left: 3px;
+  font-family: var(--font-num);
+  font-size: 13px;
+  border: 1px solid var(--divider);
+  background: #fff;
+  color: var(--text);
+  cursor: pointer;
+}
+.ge-z.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.ge-tools .legend { margin: 0; }
+
 .s-bar {
   position: absolute;
   height: 14px;
