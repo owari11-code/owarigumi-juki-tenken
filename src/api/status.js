@@ -6,7 +6,7 @@ import { safeEqual } from '../lib/crypto.js';
 import { configured, selectPage, dbFailure } from '../lib/db.js';
 
 /* 公開した版の目印。中身を直したら、ここも新しくする（どの版が動いているか分かるように） */
-export const VERSION = '2026-09-18-2';
+export const VERSION = '2026-09-18-3';
 
 /* GET /api/status  … 設定済みかどうかだけを返す（値は一切返さない） */
 export async function status({ env }) {

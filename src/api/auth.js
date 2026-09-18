@@ -159,6 +159,7 @@ export async function setup({ request, env }) {
     return loggedIn(env, res.user, false);
   } catch (e) {
     const f = dbFailure(e);
-    return fail(f.status, f.code, f.message);
+    // ※一時的：原因を特定するため、保管先の応答をそのまま添える（特定でき次第、元に戻す）
+    return fail(f.status, f.code, f.message + ' 応答=' + String((e && e.detail) || '').slice(0, 220));
   }
 }
