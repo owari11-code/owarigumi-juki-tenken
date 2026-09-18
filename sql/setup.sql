@@ -228,7 +228,9 @@ begin
   values (lower(trim(p_login)), trim(p_name), 'admin', crypt(p_password, gen_salt('bf', 10)), now())
   returning id into new_id;
 
-  delete from public.maruten_setup;
+  -- 使い終わったコードを消す。Supabase は WHERE の無い DELETE を禁止しているため、
+  -- 必ず条件を付ける（この関数は PostgREST 経由で動くため）
+  delete from public.maruten_setup where code = s.code;
 
   return jsonb_build_object('ok', true, 'user', jsonb_build_object(
     'id', new_id, 'loginId', lower(trim(p_login)), 'name', trim(p_name), 'role', 'admin',
