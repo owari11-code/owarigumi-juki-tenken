@@ -79,6 +79,7 @@
       UI.field('工事名（現場名）', UI.text('f-name', site.name, '例：○○川災害復旧工事'), true) +
       UI.field('発注者', UI.text('f-client', site.client, '例：愛知県○○建設事務所')) +
       UI.field('工事場所', UI.text('f-location', site.location, '例：豊田市○○町地内')) +
+      UI.field('工事延長・数量', UI.text('f-extent', site.extent, '例：L=34.4m'), false, '実施工程表（Excel）の「工事延長」欄に入ります') +
       '<div class="field-row">' +
       UI.field('工期（開始）', UI.date('f-from', site.periodFrom)) +
       UI.field('工期（終了）', UI.date('f-to', site.periodTo)) +
@@ -105,6 +106,7 @@
       site.contractNo = U.val('#f-contract');
       site.client = U.val('#f-client');
       site.location = U.val('#f-location');
+      site.extent = U.val('#f-extent');
       site.periodFrom = from;
       site.periodTo = to;
       site.manager = U.val('#f-manager');
@@ -179,6 +181,7 @@
       var html = '<div class="card blueprint">' + UI.corners() +
         '<table class="kv"><tbody>' +
         kv('工事番号', site.contractNo) + kv('発注者', site.client) + kv('工事場所', site.location) +
+        kv('工事延長', site.extent) +
         kv('工期', U.periodText(site.periodFrom, site.periodTo)) +
         kv('現場代理人', site.manager) + kv('主任技術者', site.engineer) +
         '</tbody></table></div>';

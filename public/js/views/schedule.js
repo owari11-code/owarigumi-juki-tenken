@@ -426,86 +426,439 @@
   }
 
   /* ------------------------------------------------------------------ *
-   * Excelに出力（本物のグラフ入り）
+   * Excelに出力（実施工程表の様式）
+   *
+   *   左に「工種・種別・数量・単位・構成比率」、右に月日のマス目。
+   *   1つの種別につき3行（予定＝黒線／実績＝赤線／区切り）を使い、
+   *   マス目の上に出来高曲線（予定＝黒・実績＝赤）を重ねる。
    * ------------------------------------------------------------------ */
+  function eraDate(d) {
+    if (!U.isDate(d)) return '';
+    var y = Number(d.slice(0, 4)) - 2018;
+    return '令和' + (y === 1 ? '元' : y) + '年' + Number(d.slice(5, 7)) + '月' + Number(d.slice(8, 10)) + '日';
+  }
+
+  function eraFiscal(y) {
+    var n = y - 2018;
+    return '令和' + (n === 1 ? '元' : n) + '年度';
+  }
+
+  /** 実績の帯の終わり（予定期間のうち、進捗のぶんだけ塗る） */
+  function actualEnd(t, prog) {
+    var dur = U.diffDays(t.planStart, t.planEnd) + 1;
+    var len = Math.max(1, Math.round(dur * prog / 100));
+    return U.addDays(t.planStart, len - 1);
+  }
+
   function toExcel(site, tasks) {
-    var X = MT.xlsx;
+    var XL = MT.xlsx;
     var today = U.todayStr();
     var r = range(site, tasks);
-    var n = tasks.length;
-
-    /* ① 工程表（横棒グラフ） */
-    var rows1 = [[{ text: '工種', bold: true }, { text: '開始', bold: true }, { text: '日数', bold: true },
-      { text: '終了', bold: true }, { text: '重み', bold: true }, { text: '予定(%)', bold: true },
-      { text: '実績(%)', bold: true }, { text: '実績開始', bold: true }, { text: '実績終了', bold: true },
-      { text: '備考', bold: true }]];
-    var names = [], offs = [], lens = [];
+    var days = Math.min(r.days, 800);
+    var from = r.from;
+    var to = U.addDays(from, days - 1);
+    // 工種（大分類）ごとにまとまるよう並べ替える（大分類が空なら、これまでどおり日付順）
+    var firstOf = {};
     tasks.forEach(function (t) {
-      var ok = U.isDate(t.planStart) && U.isDate(t.planEnd);
-      var len = ok ? U.diffDays(t.planStart, t.planEnd) + 1 : null;
-      names.push(t.name || '（名称なし）');
-      offs.push(ok ? X.dateSerial(t.planStart) : null);
-      lens.push(len);
-      rows1.push([
-        t.name, ok ? { date: t.planStart } : '', { num: len },
-        ok ? { date: t.planEnd } : '',
-        { num: U.num(t.weight) },
-        { pct: Math.round(M.taskPlanned(t, today) * 10) / 10 },
-        { pct: U.clamp(U.num(t.progress) || 0, 0, 100) },
-        U.isDate(t.actualStart) ? { date: t.actualStart } : '',
-        U.isDate(t.actualEnd) ? { date: t.actualEnd } : '',
-        t.note || ''
-      ]);
+      var g = t.group || '', d = t.planStart || '9999-99-99';
+      if (!firstOf[g] || d < firstOf[g]) firstOf[g] = d;
     });
+    tasks = tasks.slice().sort(function (a, b) {
+      var ga = a.group || '', gb = b.group || '';
+      if (ga !== gb) {
+        var fa = firstOf[ga], fb = firstOf[gb];
+        if (fa !== fb) return fa < fb ? -1 : 1;
+        return ga < gb ? -1 : 1;
+      }
+      var sa = a.planStart || '9999', sb = b.planStart || '9999';
+      return sa < sb ? -1 : sa > sb ? 1 : U.byName(a, b);
+    });
+    var n = tasks.length;
+    if (!n) return U.toast('工種がありません');
 
-    var last1 = n + 1;
-    var sheet1 = {
-      name: '工程表', freezeTop: true,
-      cols: [{ w: 24 }, { w: 12 }, { w: 8 }, { w: 12 }, { w: 8 }, { w: 10 }, { w: 10 }, { w: 12 }, { w: 12 }, { w: 24 }],
-      rows: rows1
-    };
-    if (n) {
-      sheet1.chart = {
-        kind: 'bar', sheet: '工程表', reverseCat: true, legend: false, gapWidth: 45,
-        title: site.name + '　工程表（' + U.formatDate(today) + '現在）',
-        anchor: { col: 10, row: 0, col2: 27, row2: Math.max(24, n + 4) },
-        cat: { ref: '$A$2:$A$' + last1, values: names, text: true },
-        series: [
-          { name: '開始', nameRef: '$B$1', ref: '$B$2:$B$' + last1, values: offs, color: 'none' },
-          { name: '日数', nameRef: '$C$1', ref: '$C$2:$C$' + last1, values: lens, color: '2F6DB5' }
-        ],
-        valAx: {
-          min: X.dateSerial(r.from), max: X.dateSerial(r.to) + 1, numFmt: 'm/d',
-          unit: r.days <= 70 ? 7 : r.days <= 200 ? 14 : 30
-        }
-      };
+    var C_DAY = 6;                       // G列（0始まり）から日付のマス目
+    var C_NOTE = C_DAY + days;           // 摘要
+    var NCOL = C_NOTE + 1;
+    var R_HEAD = 4;                      // 表の見出し（年度／月／日）の最初の行
+    var R_BODY = R_HEAD + 3;             // 種別の最初の行
+
+    var sumW = 0;
+    tasks.forEach(function (t) { sumW += (U.num(t.weight) > 0 ? U.num(t.weight) : 1); });
+    function ratioOf(t) {
+      var w = U.num(t.weight) > 0 ? U.num(t.weight) : 1;
+      return sumW ? w / sumW * 100 : 0;
     }
 
-    /* ② 出来形（折れ線グラフ） */
+    /* ---- 書式 ---- */
+    var BOX = { l: 'thin', r: 'thin', t: 'thin', b: 'thin' };
+    var TITLE = { sz: 16, b: true, align: { h: 'center', v: 'center' } };
+    var LABEL = { sz: 10 };
+    var LABEL_R = { sz: 10, color: 'C00000' };
+    var TH = { sz: 9, b: true, align: { h: 'center', v: 'center', wrap: true }, border: BOX };
+    var TD = { sz: 9, align: { h: 'left', v: 'center', shrink: true }, border: { l: 'thin', r: 'thin' } };
+    var TD_C = { sz: 9, align: { h: 'center', v: 'center' }, border: { l: 'thin', r: 'thin' } };
+    var TD_N = { sz: 9, align: { h: 'center', v: 'center' }, fmt: '#,##0.0', border: { l: 'thin', r: 'thin' } };
+    var SCALE = { sz: 7, color: '555555', align: { h: 'right', v: 'center' } };
+    var TICK = { sz: 6.5, color: '555555', align: { h: 'right', v: 'center' } };
+    var MON = { sz: 8.5, align: { h: 'center', v: 'center' }, border: { l: 'thin', r: 'thin', t: 'thin', b: 'thin' } };
+    var CAP = { sz: 6.5, align: { h: 'left', v: 'center' } };
+    var CAP_R = { sz: 6.5, color: 'C00000', align: { h: 'left', v: 'center' } };
+    var SUM = { sz: 7.5, align: { h: 'right', v: 'center' } };
+    var SUM_R = { sz: 7.5, color: 'C00000', align: { h: 'right', v: 'center' } };
+    var NOTE = { sz: 8, align: { h: 'left', v: 'center', wrap: true }, border: { l: 'thin', r: 'thin' } };
+
+    function dayCell(i, extra) {
+      var b = {};
+      if (isMonthStart(i)) b.l = 'thin';
+      if (extra && extra.b) b.b = extra.b;
+      var s = { sz: 6.5 };
+      if (b.l || b.b) s.border = b;
+      return s;
+    }
+
+    var monthStarts = {};
+    var monthEnds = [];
+    (function () {
+      var ym = from.slice(0, 7), guard = 0;
+      while (ym <= to.slice(0, 7) && guard++ < 400) {
+        var s = U.diffDays(from, ym + '-01');
+        if (s > 0) monthStarts[s] = true;
+        var last = ym + '-' + U.pad(U.daysInMonth(ym));
+        monthEnds.push({ ym: ym, i: Math.min(days - 1, U.diffDays(from, last)), from: Math.max(0, s), date: last });
+        ym = U.addMonths(ym, 1);
+      }
+    })();
+    function isMonthStart(i) { return !!monthStarts[i]; }
+
+    /* ---- 行を作る ---- */
+    var rows = [], merges = [];
+    function row(h) { var o = { h: h, cells: new Array(NCOL) }; rows.push(o); return o; }
+    function at(ri) { return rows[ri]; }
+    function put(ri, ci, v) { rows[ri].cells[ci] = v; }
+    function ref(ri, ci) { return XL.colName(ci + 1) + (ri + 1); }
+    function merge(r1, c1, r2, c2) { merges.push(ref(r1, c1) + ':' + ref(r2, c2)); }
+
+    // 0: 標題
+    row(26);
+    put(0, 0, { text: '実　施　工　程　表', s: TITLE });
+    merge(0, 0, 0, Math.min(NCOL - 1, C_NOTE));
+
+    // 1: 工事名  2: 工期
+    row(16);
+    put(1, 0, { text: '工　事　名：', s: LABEL });
+    put(1, 1, { text: site.name || '', s: LABEL });
+    row(16);
+    put(2, 0, { text: '工　期：', s: LABEL });
+    put(2, 1, { text: eraDate(site.periodFrom) + (site.periodTo ? '　〜　' : ''), s: LABEL });
+    put(2, 3, { text: eraDate(site.periodTo), s: LABEL_R });
+
+    // 3: 余白
+    row(6);
+
+    /* ---- 見出し（3行） ---- */
+    row(16); row(16); row(14);
+
+    put(R_HEAD, 0, { text: '費目・工種・種別等', s: TH });
+    merge(R_HEAD, 0, R_HEAD, 1);
+    put(R_HEAD + 1, 0, { text: '工事延長', s: TH });
+    put(R_HEAD + 1, 1, { text: site.extent || '', s: { sz: 9, align: { h: 'center', v: 'center' }, border: BOX } });
+    put(R_HEAD + 2, 0, { text: '工　種', s: TH });
+    put(R_HEAD + 2, 1, { text: '種　別', s: TH });
+
+    put(R_HEAD, 2, { text: '数　量', s: TH });
+    put(R_HEAD, 3, { text: '単位', s: TH });
+    put(R_HEAD, 4, { text: '構成比率(%)', s: TH });
+    [2, 3, 4].forEach(function (c) {
+      merge(R_HEAD, c, R_HEAD + 2, c);
+      put(R_HEAD + 1, c, { s: TH });
+      put(R_HEAD + 2, c, { s: TH });
+    });
+    put(R_HEAD, 5, { s: TH });
+    put(R_HEAD + 1, 5, { text: '月', s: TH });
+    put(R_HEAD + 2, 5, { text: '日', s: TH });
+
+    // 見出しの3行は、日付のマス全部に罫線を入れておく（結合セルの枠は各マスの罫線で描かれるため）
+    function hdrStyle(i, extra) {
+      var b = { t: 'thin', b: 'thin' };
+      if (isMonthStart(i) || i === 0) b.l = 'thin';
+      if (i === days - 1) b.r = 'thin';
+      var s0 = { sz: (extra && extra.sz) || 8.5, align: { h: (extra && extra.h) || 'center', v: 'center' }, border: b };
+      return s0;
+    }
+    for (var hi = 0; hi < days; hi++) {
+      put(R_HEAD, C_DAY + hi, { s: hdrStyle(hi) });
+      put(R_HEAD + 1, C_DAY + hi, { s: hdrStyle(hi) });
+      put(R_HEAD + 2, C_DAY + hi, { s: hdrStyle(hi, { sz: 6.5, h: 'right' }) });
+    }
+
+    // 年度（4月始まり）
+    (function () {
+      var seg = null;
+      monthEnds.forEach(function (m) {
+        var y = Number(m.ym.slice(0, 4)) - (Number(m.ym.slice(5, 7)) < 4 ? 1 : 0);
+        if (!seg || seg.y !== y) {
+          if (seg) flush(seg);
+          seg = { y: y, from: m.from, to: m.i };
+        } else seg.to = m.i;
+      });
+      if (seg) flush(seg);
+      function flush(s) {
+        put(R_HEAD, C_DAY + s.from, { text: eraFiscal(s.y), s: hdrStyle(s.from) });
+        if (s.to > s.from) merge(R_HEAD, C_DAY + s.from, R_HEAD, C_DAY + s.to);
+      }
+    })();
+
+    // 月と日
+    monthEnds.forEach(function (m) {
+      put(R_HEAD + 1, C_DAY + m.from, { text: Number(m.ym.slice(5)) + '月', s: hdrStyle(m.from) });
+      if (m.i > m.from) merge(R_HEAD + 1, C_DAY + m.from, R_HEAD + 1, C_DAY + m.i);
+      var dim = U.daysInMonth(m.ym);
+      [10, 20, dim].forEach(function (d) {
+        var i = U.diffDays(from, m.ym + '-' + U.pad(d));
+        if (i >= 0 && i < days) put(R_HEAD + 2, C_DAY + i, { text: String(d), s: hdrStyle(i, { sz: 6.5, h: 'right' }) });
+      });
+    });
+
+    put(R_HEAD, C_NOTE, { text: '摘　要', s: TH });
+    merge(R_HEAD, C_NOTE, R_HEAD + 2, C_NOTE);
+    put(R_HEAD + 1, C_NOTE, { s: TH });
+    put(R_HEAD + 2, C_NOTE, { s: TH });
+
+    /* ---- 種別ごとに3行 ---- */
+    var blockTop = R_BODY;
+    tasks.forEach(function (t, k) {
+      var r0 = R_BODY + k * 3;
+      row(10); row(10); row(3);
+
+      var ratio = ratioOf(t);
+      var left = [
+        [1, t.name || '', TD],
+        [2, U.num(t.qty) === null ? '' : { num: U.num(t.qty), s: TD_N }, TD_N],
+        [3, t.unit || '', TD_C],
+        [4, { num: Math.round(ratio * 100) / 100, s: TD_N }, TD_N]
+      ];
+      left.forEach(function (c) {
+        var v = c[1];
+        put(r0, c[0], typeof v === 'object' && v !== null ? v : { text: v, s: c[2] });
+        put(r0 + 1, c[0], { s: c[2] });
+        put(r0 + 2, c[0], { s: { sz: 9, border: { l: 'thin', r: 'thin', b: 'thin' } } });
+        merge(r0, c[0], r0 + 2, c[0]);
+      });
+      // 工種（大分類）は、同じものが続くあいだ1つにまとめる
+      var prev = k ? (tasks[k - 1].group || '') : null;
+      var cur = t.group || '';
+      put(r0, 0, { text: (k && cur && cur === prev) ? '' : cur, s: TD });
+      put(r0 + 1, 0, { s: TD });
+      put(r0 + 2, 0, { s: { sz: 9, border: { l: 'thin', r: 'thin', b: (k + 1 < n && cur && (tasks[k + 1].group || '') === cur) ? null : 'thin' } } });
+      put(r0, 5, { s: { sz: 7 } });
+
+      // 区切り線（マス目の下端）
+      for (var i = 0; i < days; i++) put(r0 + 2, C_DAY + i, { s: dayCell(i, { b: 'thin' }) });
+      for (i = 0; i < days; i++) {
+        if (isMonthStart(i)) { put(r0, C_DAY + i, { s: dayCell(i) }); put(r0 + 1, C_DAY + i, { s: dayCell(i) }); }
+      }
+      put(r0, C_NOTE, { text: t.note || '', s: NOTE });
+      put(r0 + 1, C_NOTE, { s: NOTE });
+      put(r0 + 2, C_NOTE, { s: { sz: 8, border: { l: 'thin', r: 'thin', b: 'thin' } } });
+
+      if (!U.isDate(t.planStart) || !U.isDate(t.planEnd)) return;
+
+      // 予定（黒）
+      var s1 = U.clamp(U.diffDays(from, t.planStart), 0, days - 1);
+      var e1 = U.clamp(U.diffDays(from, t.planEnd), 0, days - 1);
+      for (i = s1; i <= e1; i++) {
+        put(r0, C_DAY + i, { s: { sz: 6.5, border: { l: isMonthStart(i) ? 'thin' : null, b: { s: 'thick', c: '000000' } } } });
+      }
+      if (e1 + 1 < days) put(r0, C_DAY + e1 + 1, { text: '100(' + (Math.round(ratio * 100) / 100) + ')', s: CAP });
+
+      // 実績（赤）
+      var prog = U.clamp(U.num(t.progress) || 0, 0, 100);
+      if (prog > 0) {
+        var ae = actualEnd(t, prog);
+        var s2 = U.clamp(U.diffDays(from, t.actualStart && U.isDate(t.actualStart) ? t.actualStart : t.planStart), 0, days - 1);
+        var e2 = U.clamp(U.diffDays(from, ae), s2, days - 1);
+        for (i = s2; i <= e2; i++) {
+          put(r0 + 1, C_DAY + i, { s: { sz: 6.5, border: { l: isMonthStart(i) ? 'thin' : null, b: { s: 'thick', c: 'C00000' } } } });
+        }
+        if (e2 + 1 < days) {
+          put(r0 + 1, C_DAY + e2 + 1, { text: prog + '(' + (Math.round(ratio * prog) / 100) + ')', s: CAP_R });
+        }
+      }
+    });
+
+    // 同じ大分類が続く範囲を、縦に結合する
+    (function () {
+      var start = 0;
+      for (var k = 1; k <= n; k++) {
+        var cur = k < n ? (tasks[k].group || '') : null;
+        var prev = tasks[start].group || '';
+        if (cur !== prev || k === n) {
+          if (prev && k - start > 1) merge(R_BODY + start * 3, 0, R_BODY + (k - 1) * 3 + 2, 0);
+          else if (k - start === 1) merge(R_BODY + start * 3, 0, R_BODY + start * 3 + 2, 0);
+          start = k;
+        }
+      }
+    })();
+
+    var bodyRows = Math.max(1, n * 3);
+    var R_END = R_BODY + bodyRows;          // 種別の次の行
+
+    /* ---- 左の目盛（0〜100%） ---- */
+    (function () {
+      var hs = [];
+      tasks.forEach(function () { hs.push(10, 10, 3); });
+      var H = 0, used = {};
+      hs.forEach(function (h) { H += h; });
+      for (var p = 100; p >= 0; p -= 10) {
+        var y = (1 - p / 100) * H, acc = 0, idx = hs.length - 1;
+        for (var i = 0; i < hs.length; i++) {
+          if (y < acc + hs[i]) { idx = i; break; }
+          acc += hs[i];
+        }
+        if (used[idx]) continue;
+        used[idx] = true;
+        put(R_BODY + idx, 5, { text: String(p), s: SCALE });
+      }
+    })();
+
+    /* ---- 全体（金額）工程 ---- */
+    rows.push({ h: 13, cells: new Array(NCOL) });
+    rows.push({ h: 13, cells: new Array(NCOL) });
+    var rPlan = R_END, rDone = R_END + 1;
+
+    function botStyle(i, top) {
+      var b = top ? { t: 'thin' } : { b: 'thin' };
+      if (isMonthStart(i) || i === 0) b.l = 'thin';
+      if (i === days - 1) b.r = 'thin';
+      return { sz: 7.5, color: top ? '000000' : 'C00000', align: { h: 'right', v: 'center' }, border: b };
+    }
+    for (var bi = 0; bi < days; bi++) {
+      put(rPlan, C_DAY + bi, { s: botStyle(bi, true) });
+      put(rDone, C_DAY + bi, { s: botStyle(bi, false) });
+    }
+
+    var titleTop = { sz: 9, b: true, align: { h: 'center', v: 'center' }, border: { l: 'thin', r: 'thin', t: 'thin' } };
+    var titleBot = { sz: 9, align: { h: 'center', v: 'center' }, border: { l: 'thin', r: 'thin', b: 'thin' } };
+    put(rPlan, 0, { text: '全　体　（　金　額　）　工　程', s: titleTop });
+    [1, 2, 3].forEach(function (c) { put(rPlan, c, { s: titleTop }); put(rDone, c, { s: titleBot }); });
+    put(rDone, 0, { s: titleBot });
+    merge(rPlan, 0, rDone, 3);
+
+    put(rPlan, 4, { text: '100%', s: titleTop });
+    put(rDone, 4, { s: titleBot });
+    merge(rPlan, 4, rDone, 4);
+    put(rPlan, 5, { text: '計画', s: { sz: 7.5, align: { h: 'center', v: 'center' }, border: { t: 'thin', l: 'thin' } } });
+    put(rDone, 5, { text: '実施', s: { sz: 7.5, color: 'C00000', align: { h: 'center', v: 'center' }, border: { b: 'thin', l: 'thin' } } });
+
+    var logs = Store.list('progress_logs', null, site.id).sort(function (a, b) {
+      return String(a.date || '').localeCompare(String(b.date || ''));
+    });
+    var nowP = M.progress(site.id);
+    monthEnds.forEach(function (m) {
+      // 数値のままだと列が狭くて表示されないため、文字として入れる（右に揃えて左へはみ出させる）
+      var pl = M.progress(site.id, m.date).planned;
+      put(rPlan, C_DAY + m.i, { text: (Math.round(pl * 100) / 100).toFixed(2) + '%', s: botStyle(m.i, true) });
+      if (m.date <= today || m.ym === today.slice(0, 7)) {
+        var v = null;
+        logs.forEach(function (l) { if (l.date && l.date <= m.date) v = U.num(l.actual); });
+        if (m.ym === today.slice(0, 7)) v = nowP.actual;
+        if (v !== null) put(rDone, C_DAY + m.i, { text: (Math.round(v * 100) / 100).toFixed(2) + '%', s: botStyle(m.i, false) });
+      }
+    });
+    put(rPlan, C_NOTE, { s: { sz: 8, border: { l: 'thin', r: 'thin', t: 'thin' } } });
+    put(rDone, C_NOTE, { s: { sz: 8, border: { l: 'thin', r: 'thin', b: 'thin' } } });
+
+    /* ---- 記事 ---- */
+    rows.push({ h: 18, cells: new Array(NCOL) });
+    var rNote = rDone + 1;
+    var noteBox = { sz: 9, align: { h: 'center', v: 'center' }, border: { t: 'thin', b: 'thin' } };
+    put(rNote, 0, { text: '記　　事', s: { sz: 9, align: { h: 'center', v: 'center' }, border: BOX } });
+    put(rNote, 1, { s: { sz: 9, align: { h: 'center', v: 'center' }, border: BOX } });
+    merge(rNote, 0, rNote, 1);
+    for (var ni = 2; ni <= C_NOTE; ni++) {
+      put(rNote, ni, { s: { sz: 9, border: { t: 'thin', b: 'thin', l: ni === 2 ? 'thin' : null, r: ni === C_NOTE ? 'thin' : null } } });
+    }
+    merge(rNote, 2, rNote, C_NOTE);
+
+    /* ---- 凡例（摘要の欄） ---- */
+    var lg = [
+      ['凡例', { sz: 8, b: true, align: { v: 'center' }, border: { l: 'thin', r: 'thin' } }],
+      ['施工進度管理', { sz: 8, align: { v: 'center' }, border: { l: 'thin', r: 'thin' } }],
+      ['　予定', { sz: 8, align: { v: 'center' }, border: { l: 'thin', r: 'thin', b: { s: 'thick', c: '000000' } } }],
+      ['　実績', { sz: 8, color: 'C00000', align: { v: 'center' }, border: { l: 'thin', r: 'thin', b: { s: 'thick', c: 'C00000' } } }],
+      ['', { sz: 8, border: { l: 'thin', r: 'thin' } }],
+      ['全体工程管理', { sz: 8, align: { v: 'center' }, border: { l: 'thin', r: 'thin' } }],
+      ['　予定（曲線）', { sz: 8, align: { v: 'center' }, border: { l: 'thin', r: 'thin', b: { s: 'medium', c: '000000' } } }],
+      ['　実績（曲線）', { sz: 8, color: 'C00000', align: { v: 'center' }, border: { l: 'thin', r: 'thin', b: { s: 'medium', c: 'C00000' } } }]
+    ];
+    var lgStep = bodyRows >= lg.length * 3 ? 3 : (bodyRows >= lg.length * 2 ? 2 : 1);
+    lg.forEach(function (item, k) {
+      var ri = R_BODY + k * lgStep;
+      if (ri < R_END) put(ri, C_NOTE, { text: item[0], s: item[1] });
+    });
+
+    /* ---- 出来形（別シート・曲線のもと） ---- */
     var c = curveData(site, tasks);
     var rows2 = [[{ text: '日付', bold: true }, { text: '予定(%)', bold: true }, { text: '実績(%)', bold: true }]];
     var sheet2 = { name: '出来形', freezeTop: true, cols: [{ w: 12 }, { w: 10 }, { w: 10 }], rows: rows2 };
+    var xs = [], ys = [], as = [];
     if (c) {
       c.dates.forEach(function (d, i) {
         rows2.push([{ date: d }, { pct: c.plan[i] }, c.actual[i] === null ? '' : { pct: c.actual[i] }]);
+        xs.push(XL.dateSerial(d));
+        ys.push(c.plan[i]);
+        as.push(c.actual[i]);
       });
       var last2 = c.dates.length + 1;
       sheet2.chart = {
-        kind: 'line', sheet: '出来形',
+        kind: 'line', sheet: '出来形', legend: true,
         title: '出来形（全体進捗率）　' + site.name,
         anchor: { col: 4, row: 0, col2: 20, row2: 26 },
-        cat: { ref: '$A$2:$A$' + last2, values: c.dates.map(X.dateSerial), fmt: 'm/d' },
-        tickLblSkip: Math.max(1, Math.ceil(c.dates.length / 12)),
+        cat: { ref: '$A$2:$A$' + last2, values: xs, fmt: 'm/d' },
+        valAx: { min: 0, max: 100, numFmt: '0"%"', unit: 20, grid: true },
         series: [
-          { name: '予定', nameRef: '$B$1', ref: '$B$2:$B$' + last2, values: c.plan, color: '8E9AAF', fmt: '0.0"%"' },
-          { name: '実績', nameRef: '$C$1', ref: '$C$2:$C$' + last2, values: c.actual, color: 'C0392B', marker: 'circle', fmt: '0.0"%"' }
-        ],
-        valAx: { min: 0, max: 100, numFmt: '0"%"', unit: 20 }
+          { name: '予定', nameRef: '$B$1', ref: '$B$2:$B$' + last2, values: ys, color: '8E9AAF', fmt: '0.0"%"' },
+          { name: '実績', nameRef: '$C$1', ref: '$C$2:$C$' + last2, values: as, color: 'C0392B', marker: 'circle', fmt: '0.0"%"' }
+        ]
       };
     }
 
-    var name = '工程表_' + (site.name || '現場').replace(/[\\/:*?"<>|]/g, '_') + '_' + today.replace(/-/g, '') + '.xlsx';
-    X.save(name, { sheets: [sheet1, sheet2] });
+    /* ---- マス目に重ねる曲線（散布図・軸も枠も出さない） ---- */
+    var charts = [];
+    if (c && n) {
+      var lastRow = c.dates.length + 1;
+      charts.push({
+        kind: 'scatter', sheet: '出来形', full: true, transparent: true, hideAxes: true, legend: false,
+        anchor: { col: C_DAY, row: R_BODY, col2: C_DAY + days, row2: R_END },
+        xAx: { min: XL.dateSerial(from), max: XL.dateSerial(to) + 1 },
+        yAx: { min: 0, max: 100 },
+        series: [
+          { name: '予定', sheet: '出来形', xRef: '$A$2:$A$' + lastRow, xValues: xs, yRef: '$B$2:$B$' + lastRow, yValues: ys, color: '000000', width: 12700 },
+          { name: '実績', sheet: '出来形', xRef: '$A$2:$A$' + lastRow, xValues: xs, yRef: '$C$2:$C$' + lastRow, yValues: as, color: 'C00000', width: 12700 }
+        ]
+      });
+    }
+
+    /* ---- 列幅 ---- */
+    var dayW = days <= 120 ? 1.1 : days <= 250 ? 0.6 : 0.25;
+    var cols = [{ w: 12 }, { w: 16 }, { w: 7 }, { w: 5 }, { w: 8 }, { w: 4.2 }];
+    cols.push({ w: dayW, to: C_NOTE });         // 日付の列をまとめて指定
+    cols[C_NOTE] = { w: 13 };
+
+    var sheet1 = {
+      name: '実施工程表',
+      gridLines: false,
+      rowHeight: 13,
+      cols: cols,
+      rows: rows,
+      merges: merges,
+      freeze: { x: C_DAY, y: R_BODY },
+      print: { paper: 8, landscape: true, fitW: 1, fitH: 1 },
+      charts: charts
+    };
+
+    var name = '実施工程表_' + (site.name || '現場').replace(/[\\/:*?"<>|]/g, '_') + '_' + today.replace(/-/g, '') + '.xlsx';
+    XL.save(name, { sheets: [sheet1, sheet2] });
     U.toast('Excelに出力しました');
   }
 
@@ -555,7 +908,7 @@
       }
 
       html += UI.btnRow(
-        (tasks.length ? '<button class="btn secondary" id="b-excel">Excelに出力（グラフ入り）</button>' : '') +
+        (tasks.length ? '<button class="btn secondary" id="b-excel">実施工程表をExcelに出力</button>' : '') +
         '<a class="btn plain" href="#/task/new?site=' + sid + '">工種を詳しく登録</a>' +
         (tasks.length ? '<a class="btn plain" href="#/print/schedule?site=' + sid + '">工程表を印刷</a>' : ''));
       return html;
@@ -611,6 +964,10 @@
       '<p class="muted">' + esc(site.name) + (site.periodFrom ? '　工期 ' + esc(U.periodText(site.periodFrom, site.periodTo)) : '') + '</p>' +
       '<div class="card">' +
       UI.field('工種', UI.text('f-name', task.name, '例：準備工／掘削工／コンクリート工'), true) +
+      '<div class="field-row">' +
+      UI.field('大分類', UI.text('f-group', task.group, '例：砂防土工／法面工'), false, '実施工程表（Excel）の「工種」欄に入ります') +
+      UI.field('数量', UI.number('f-qty', task.qty, ' step="any" min="0"'), false, '空欄でもかまいません') +
+      UI.field('単位', UI.text('f-unit', task.unit, '例：m3／m2／式'), false) + '</div>' +
       '<div class="field-row">' + UI.field('予定（開始）', UI.date('f-ps', task.planStart || site.periodFrom), true) +
       UI.field('予定（終了）', UI.date('f-pe', task.planEnd || site.periodTo), true) + '</div>' +
       '<div class="field-row">' + UI.field('重み', UI.number('f-weight', task.weight, ' step="any" min="0"'), false, '金額の構成比など。空欄なら均等') +
@@ -629,6 +986,9 @@
       if (ps > pe) return U.toast('予定の終了日は開始日より後にしてください');
       if (prog === null || prog < 0 || prog > 100) return U.toast('進捗は0〜100で入力してください');
       task.name = name;
+      task.group = U.val('#f-group');
+      task.qty = U.num(U.val('#f-qty'));
+      task.unit = U.val('#f-unit');
       task.planStart = ps;
       task.planEnd = pe;
       task.weight = U.num(U.val('#f-weight'));

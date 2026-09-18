@@ -3,13 +3,14 @@
  *
  * 外部の部品は使わない（CSPで外部スクリプトを禁じているため）。
  * .xlsx は「XMLをZIPでまとめたもの」なので、ZIPの書き出しからXMLの組み立てまで自前で行う。
- * 表だけでなく、Excelの本物のグラフ（横棒＝工程表、折れ線＝出来形）も入れる。
- * 本物のグラフなので、Excel側で色や期間を後から直せる。
+ *
+ * できること
+ *   ・文字・数値・日付・パーセントのセル、書式（太字・色・罫線・塗り・配置・縦書き）
+ *   ・セルの結合、行の高さ、列幅、枠の固定、目盛線を隠す、印刷の設定
+ *   ・Excelの本物のグラフ（横棒＝工程表／折れ線＝出来形／散布図＝表に重ねる曲線）
  *
  * 使い方
- *   MT.xlsx.save('工程表.xlsx', {
- *     sheets: [{ name:'工程表', cols:[{w:18}], rows:[[{text:'工種',bold:true}], ['掘削工']], chart:{…} }]
- *   });
+ *   MT.xlsx.save('工程表.xlsx', { sheets: [ { name:'工程表', rows:[…], … } ] });
  */
 (function (global) {
   'use strict';
@@ -90,9 +91,9 @@
       var lh = new Uint8Array(30);
       var lv = new DataView(lh.buffer);
       lv.setUint32(0, 0x04034b50, true);
-      lv.setUint16(4, 20, true);       // 展開に必要な版
-      lv.setUint16(6, 0x0800, true);   // ファイル名はUTF-8
-      lv.setUint16(8, 0, true);        // 無圧縮
+      lv.setUint16(4, 20, true);
+      lv.setUint16(6, 0x0800, true);
+      lv.setUint16(8, 0, true);
       lv.setUint16(10, dosTime, true);
       lv.setUint16(12, dosDate, true);
       lv.setUint32(14, crc, true);
@@ -104,7 +105,7 @@
       var ch = new Uint8Array(46);
       var cv = new DataView(ch.buffer);
       cv.setUint32(0, 0x02014b50, true);
-      cv.setUint16(4, 20, true);       // 作成した版
+      cv.setUint16(4, 20, true);
       cv.setUint16(6, 20, true);
       cv.setUint16(8, 0x0800, true);
       cv.setUint16(10, 0, true);
@@ -140,93 +141,184 @@
   }
 
   /* ------------------------------------------------------------------ *
-   * シート（表）
+   * 書式（使われたぶんだけ作って、同じものは1つにまとめる）
+   *   spec = { sz, b, i, color, name, fill, border:{l,r,t,b}, align:{h,v,wrap,rot}, fmt }
+   *   border の各辺 = 'thin' | 'medium' | 'thick' | 'double' | {s:'thick', c:'FF0000'}
    * ------------------------------------------------------------------ */
-  // 書式：0=標準 1=見出し（太字） 2=日付 3=パーセント 4=見出し（中央）
-  function cellXml(ref, v) {
-    if (v === null || v === undefined || v === '') return '';
-    if (typeof v === 'object') {
-      if (v.date !== undefined) {
-        var s = X.dateSerial(v.date);
-        return s === null ? '' : '<c r="' + ref + '" s="2"><v>' + s + '</v></c>';
-      }
-      if (v.pct !== undefined) {
-        return v.pct === null ? '' : '<c r="' + ref + '" s="3"><v>' + v.pct + '</v></c>';
-      }
-      if (v.num !== undefined) {
-        return v.num === null ? '' : '<c r="' + ref + '"><v>' + v.num + '</v></c>';
-      }
-      var st = v.bold ? (v.center ? 4 : 1) : 0;
-      return '<c r="' + ref + '" s="' + st + '" t="inlineStr"><is><t xml:space="preserve">' + x(v.text) + '</t></is></c>';
-    }
-    if (typeof v === 'number') return '<c r="' + ref + '"><v>' + v + '</v></c>';
-    return '<c r="' + ref + '" t="inlineStr"><is><t xml:space="preserve">' + x(v) + '</t></is></c>';
+  var BASE_FONT = 'Meiryo UI';
+
+  function Styles() {
+    this.numFmts = [];                                   // [{id, code}]
+    this.fonts = ['<font><sz val="11"/><color rgb="FF000000"/><name val="' + BASE_FONT + '"/></font>'];
+    this.fills = ['<fill><patternFill patternType="none"/></fill>',
+      '<fill><patternFill patternType="gray125"/></fill>'];
+    this.borders = ['<border><left/><right/><top/><bottom/><diagonal/></border>'];
+    this.xfs = ['<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'];
+    this.map = {};
   }
 
-  function sheetXml(sheet) {
+  function pick(list, xml) {
+    var i = list.indexOf(xml);
+    if (i >= 0) return i;
+    list.push(xml);
+    return list.length - 1;
+  }
+
+  Styles.prototype.numFmt = function (code) {
+    for (var i = 0; i < this.numFmts.length; i++) if (this.numFmts[i].code === code) return this.numFmts[i].id;
+    var id = 164 + this.numFmts.length;
+    this.numFmts.push({ id: id, code: code });
+    return id;
+  };
+
+  Styles.prototype.id = function (spec) {
+    if (!spec) return 0;
+    var key = JSON.stringify(spec);
+    if (this.map[key] !== undefined) return this.map[key];
+
+    var f = '<font>' + (spec.b ? '<b/>' : '') + (spec.i ? '<i/>' : '') +
+      '<sz val="' + (spec.sz || 11) + '"/><color rgb="FF' + (spec.color || '000000') + '"/>' +
+      '<name val="' + (spec.name || BASE_FONT) + '"/></font>';
+    var fontId = pick(this.fonts, f);
+
+    var fillId = 0;
+    if (spec.fill) {
+      fillId = pick(this.fills, '<fill><patternFill patternType="solid">' +
+        '<fgColor rgb="FF' + spec.fill + '"/><bgColor indexed="64"/></patternFill></fill>');
+    }
+
+    var borderId = 0;
+    if (spec.border) {
+      var b = spec.border;
+      var side = function (tag, v) {
+        if (!v) return '<' + tag + '/>';
+        var st = typeof v === 'string' ? v : v.s;
+        var c = (typeof v === 'string' ? '000000' : (v.c || '000000'));
+        return '<' + tag + ' style="' + st + '"><color rgb="FF' + c + '"/></' + tag + '>';
+      };
+      borderId = pick(this.borders, '<border>' + side('left', b.l) + side('right', b.r) +
+        side('top', b.t) + side('bottom', b.b) + '<diagonal/></border>');
+    }
+
+    var numId = spec.fmt ? this.numFmt(spec.fmt) : 0;
+    var a = spec.align;
+    var xf = '<xf numFmtId="' + numId + '" fontId="' + fontId + '" fillId="' + fillId + '" borderId="' + borderId + '" xfId="0"' +
+      (numId ? ' applyNumberFormat="1"' : '') + ' applyFont="1"' +
+      (fillId ? ' applyFill="1"' : '') + (borderId ? ' applyBorder="1"' : '') +
+      (a ? ' applyAlignment="1"' : '') + '>' +
+      (a ? '<alignment' + (a.h ? ' horizontal="' + a.h + '"' : '') + (a.v ? ' vertical="' + a.v + '"' : '') +
+        (a.wrap ? ' wrapText="1"' : '') + (a.rot ? ' textRotation="' + a.rot + '"' : '') +
+        (a.shrink ? ' shrinkToFit="1"' : '') + '/>' : '') +
+      '</xf>';
+    this.xfs.push(xf);
+    var id = this.xfs.length - 1;
+    this.map[key] = id;
+    return id;
+  };
+
+  Styles.prototype.xml = function () {
+    return HEAD + '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+      (this.numFmts.length ? '<numFmts count="' + this.numFmts.length + '">' +
+        this.numFmts.map(function (n) { return '<numFmt numFmtId="' + n.id + '" formatCode="' + x(n.code) + '"/>'; }).join('') +
+        '</numFmts>' : '') +
+      '<fonts count="' + this.fonts.length + '">' + this.fonts.join('') + '</fonts>' +
+      '<fills count="' + this.fills.length + '">' + this.fills.join('') + '</fills>' +
+      '<borders count="' + this.borders.length + '">' + this.borders.join('') + '</borders>' +
+      '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
+      '<cellXfs count="' + this.xfs.length + '">' + this.xfs.join('') + '</cellXfs>' +
+      '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' +
+      '</styleSheet>';
+  };
+
+  /* ------------------------------------------------------------------ *
+   * セル・シート
+   * ------------------------------------------------------------------ */
+  function cellXml(ref, v, styles) {
+    if (v === null || v === undefined || v === '') return '';
+
+    var spec = null, val = v;
+    if (typeof v === 'object') {
+      spec = v.s || null;
+      if (v.date !== undefined) {
+        if (!v.date) return spec ? '<c r="' + ref + '" s="' + styles.id(spec) + '"/>' : '';
+        val = X.dateSerial(v.date);
+        if (val === null) return '';
+        spec = Object.assign({ fmt: 'yyyy/m/d' }, spec || {});
+      } else if (v.pct !== undefined) {
+        if (v.pct === null) return spec ? '<c r="' + ref + '" s="' + styles.id(spec) + '"/>' : '';
+        val = v.pct;
+        spec = Object.assign({ fmt: '0.0"%"' }, spec || {});
+      } else if (v.num !== undefined) {
+        if (v.num === null || v.num === '') return spec ? '<c r="' + ref + '" s="' + styles.id(spec) + '"/>' : '';
+        val = v.num;
+      } else if (v.text !== undefined) {
+        val = v.text;
+        if (v.bold) spec = Object.assign({ b: true }, spec || {});
+      } else if (v.v !== undefined) {
+        val = v.v;
+      } else {
+        // 書式だけのセル（罫線を引くため）
+        return '<c r="' + ref + '" s="' + styles.id(spec) + '"/>';
+      }
+    }
+
+    var s = spec ? ' s="' + styles.id(spec) + '"' : '';
+    if (val === null || val === undefined || val === '') return spec ? '<c r="' + ref + '"' + s + '/>' : '';
+    if (typeof val === 'number') return '<c r="' + ref + '"' + s + '><v>' + val + '</v></c>';
+    return '<c r="' + ref + '"' + s + ' t="inlineStr"><is><t xml:space="preserve">' + x(val) + '</t></is></c>';
+  }
+
+  function sheetXml(sheet, styles) {
     var cols = '';
     (sheet.cols || []).forEach(function (c, i) {
-      cols += '<col min="' + (i + 1) + '" max="' + (i + 1) + '" width="' + (c.w || 12) + '" customWidth="1"/>';
+      if (!c) return;
+      cols += '<col min="' + (i + 1) + '" max="' + (c.to || i + 1) + '" width="' + (c.w || 9) + '" customWidth="1"/>';
     });
 
     var rows = '';
     (sheet.rows || []).forEach(function (row, r) {
+      if (!row) return;
+      var list = Array.isArray(row) ? row : (row.cells || []);
       var cells = '';
-      (row || []).forEach(function (v, c) {
-        cells += cellXml(X.colName(c + 1) + (r + 1), v);
+      list.forEach(function (v, c) {
+        cells += cellXml(X.colName(c + 1) + (r + 1), v, styles);
       });
-      if (cells) rows += '<row r="' + (r + 1) + '">' + cells + '</row>';
+      var h = !Array.isArray(row) && row.h ? ' ht="' + row.h + '" customHeight="1"' : '';
+      if (cells || h) rows += '<row r="' + (r + 1) + '"' + h + '>' + cells + '</row>';
     });
 
-    var view = sheet.freezeTop
-      ? '<sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView>'
-      : '<sheetView workbookViewId="0"/>';
+    var pane = '';
+    if (sheet.freeze) {
+      var topLeft = X.colName((sheet.freeze.x || 0) + 1) + ((sheet.freeze.y || 0) + 1);
+      pane = '<pane' + (sheet.freeze.x ? ' xSplit="' + sheet.freeze.x + '"' : '') +
+        (sheet.freeze.y ? ' ySplit="' + sheet.freeze.y + '"' : '') +
+        ' topLeftCell="' + topLeft + '" activePane="bottomRight" state="frozen"/>';
+    }
+
+    var p = sheet.print || {};
+    var merges = sheet.merges && sheet.merges.length
+      ? '<mergeCells count="' + sheet.merges.length + '">' +
+        sheet.merges.map(function (m) { return '<mergeCell ref="' + m + '"/>'; }).join('') + '</mergeCells>'
+      : '';
 
     return HEAD +
       '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"' +
       ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
-      '<sheetViews>' + view + '</sheetViews>' +
-      '<sheetFormatPr defaultRowHeight="18"/>' +
+      (p.fitW || p.fitH ? '<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>' : '') +
+      '<sheetViews><sheetView workbookViewId="0"' +
+      (sheet.gridLines === false ? ' showGridLines="0"' : '') +
+      (sheet.zoom ? ' zoomScale="' + sheet.zoom + '" zoomScaleNormal="' + sheet.zoom + '"' : '') + '>' +
+      pane + '</sheetView></sheetViews>' +
+      '<sheetFormatPr defaultRowHeight="' + (sheet.rowHeight || 18) + '"/>' +
       (cols ? '<cols>' + cols + '</cols>' : '') +
       '<sheetData>' + rows + '</sheetData>' +
-      '<pageMargins left="0.5" right="0.5" top="0.6" bottom="0.6" header="0.3" footer="0.3"/>' +
-      '<pageSetup paperSize="9" orientation="landscape"/>' +
-      (sheet.chart ? '<drawing r:id="rId1"/>' : '') +
+      merges +
+      '<pageMargins left="0.3" right="0.3" top="0.4" bottom="0.4" header="0.2" footer="0.2"/>' +
+      '<pageSetup paperSize="' + (p.paper || 9) + '" orientation="' + (p.landscape === false ? 'portrait' : 'landscape') + '"' +
+      (p.fitW ? ' fitToWidth="' + p.fitW + '"' : '') + (p.fitH ? ' fitToHeight="' + p.fitH + '"' : '') +
+      (p.fitW || p.fitH ? ' scale="100"' : '') + '/>' +
+      (sheet.__drawing ? '<drawing r:id="rId1"/>' : '') +
       '</worksheet>';
-  }
-
-  function stylesXml() {
-    return HEAD +
-      '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
-      '<numFmts count="2">' +
-      '<numFmt numFmtId="164" formatCode="yyyy/m/d"/>' +
-      '<numFmt numFmtId="165" formatCode="0.0&quot;%&quot;"/>' +
-      '</numFmts>' +
-      '<fonts count="2">' +
-      '<font><sz val="11"/><color theme="1"/><name val="Meiryo UI"/></font>' +
-      '<font><b/><sz val="11"/><color theme="1"/><name val="Meiryo UI"/></font>' +
-      '</fonts>' +
-      '<fills count="3">' +
-      '<fill><patternFill patternType="none"/></fill>' +
-      '<fill><patternFill patternType="gray125"/></fill>' +
-      '<fill><patternFill patternType="solid"><fgColor rgb="FFEDF2F7"/><bgColor indexed="64"/></patternFill></fill>' +
-      '</fills>' +
-      '<borders count="2">' +
-      '<border><left/><right/><top/><bottom/><diagonal/></border>' +
-      '<border><left style="thin"><color rgb="FFB0B7C3"/></left><right style="thin"><color rgb="FFB0B7C3"/></right>' +
-      '<top style="thin"><color rgb="FFB0B7C3"/></top><bottom style="thin"><color rgb="FFB0B7C3"/></bottom><diagonal/></border>' +
-      '</borders>' +
-      '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
-      '<cellXfs count="5">' +
-      '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1"/>' +
-      '<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/>' +
-      '<xf numFmtId="164" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1"/>' +
-      '<xf numFmtId="165" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1"/>' +
-      '<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1">' +
-      '<alignment horizontal="center"/></xf>' +
-      '</cellXfs>' +
-      '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' +
-      '</styleSheet>';
   }
 
   /* ------------------------------------------------------------------ *
@@ -250,36 +342,47 @@
       '<c:ptCount val="' + values.length + '"/>' + pts + '</c:numCache></c:numRef>';
   }
 
-  function fill(color) {
+  function fillPr(color) {
     return color === 'none'
       ? '<c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr>'
       : '<c:spPr><a:solidFill><a:srgbClr val="' + color + '"/></a:solidFill>' +
         '<a:ln w="9525"><a:solidFill><a:srgbClr val="' + color + '"/></a:solidFill></a:ln></c:spPr>';
   }
 
-  function lineFill(color, width) {
-    return '<c:spPr><a:ln w="' + (width || 22225) + '" cap="rnd"><a:solidFill><a:srgbClr val="' + color + '"/></a:solidFill>' +
-      '<a:round/></a:ln><a:effectLst/></c:spPr>';
+  function linePr(color, width, dash) {
+    return '<c:spPr><a:ln w="' + (width || 19050) + '" cap="rnd"><a:solidFill><a:srgbClr val="' + color + '"/></a:solidFill>' +
+      (dash ? '<a:prstDash val="' + dash + '"/>' : '') + '<a:round/></a:ln><a:effectLst/></c:spPr>';
   }
 
   function txPr(size) {
     return '<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="' + (size || 900) + '">' +
-      '<a:latin typeface="Meiryo UI"/><a:ea typeface="Meiryo UI"/></a:defRPr></a:pPr><a:endParaRPr lang="ja-JP"/></a:p></c:txPr>';
+      '<a:latin typeface="' + BASE_FONT + '"/><a:ea typeface="' + BASE_FONT + '"/></a:defRPr></a:pPr>' +
+      '<a:endParaRPr lang="ja-JP"/></a:p></c:txPr>';
   }
 
-  function title(text) {
+  function titleXml(text) {
     return '<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="1200" b="1">' +
-      '<a:latin typeface="Meiryo UI"/><a:ea typeface="Meiryo UI"/></a:defRPr></a:pPr>' +
+      '<a:latin typeface="' + BASE_FONT + '"/><a:ea typeface="' + BASE_FONT + '"/></a:defRPr></a:pPr>' +
       '<a:r><a:rPr lang="ja-JP" sz="1200" b="1"/><a:t>' + x(text) + '</a:t></a:r></a:p></c:rich></c:tx>' +
       '<c:overlay val="0"/></c:title>';
   }
 
-  var AX_CAT = 111111111, AX_VAL = 222222222;
+  var AX1 = 111111111, AX2 = 222222222;
 
   function serXml(ch, s, i) {
     var name = s.nameRef
       ? '<c:tx>' + strRef(ch.sheet, s.nameRef, [s.name]) + '</c:tx>'
       : '<c:tx><c:v>' + x(s.name) + '</c:v></c:tx>';
+
+    if (ch.kind === 'scatter') {
+      return '<c:ser><c:idx val="' + i + '"/><c:order val="' + i + '"/>' + name +
+        linePr(s.color, s.width, s.dash) +
+        '<c:marker><c:symbol val="none"/></c:marker>' +
+        '<c:xVal>' + numRef(s.sheet || ch.sheet, s.xRef, s.xValues, 'General') + '</c:xVal>' +
+        '<c:yVal>' + numRef(s.sheet || ch.sheet, s.yRef, s.yValues, 'General') + '</c:yVal>' +
+        '<c:smooth val="0"/></c:ser>';
+    }
+
     var cat = '<c:cat>' + (ch.cat.text
       ? strRef(ch.sheet, ch.cat.ref, ch.cat.values)
       : numRef(ch.sheet, ch.cat.ref, ch.cat.values, ch.cat.fmt)) + '</c:cat>';
@@ -287,52 +390,62 @@
 
     if (ch.kind === 'line') {
       return '<c:ser><c:idx val="' + i + '"/><c:order val="' + i + '"/>' + name +
-        lineFill(s.color, s.width) +
+        linePr(s.color, s.width, s.dash) +
         '<c:marker><c:symbol val="' + (s.marker || 'none') + '"/>' +
-        (s.marker ? '<c:size val="5"/>' + fill(s.color) : '') + '</c:marker>' +
+        (s.marker ? '<c:size val="5"/>' + fillPr(s.color) : '') + '</c:marker>' +
         cat + val + '<c:smooth val="0"/></c:ser>';
     }
     return '<c:ser><c:idx val="' + i + '"/><c:order val="' + i + '"/>' + name +
-      fill(s.color) + '<c:invertIfNegative val="0"/>' + cat + val + '</c:ser>';
+      fillPr(s.color) + '<c:invertIfNegative val="0"/>' + cat + val + '</c:ser>';
+  }
+
+  function axisXml(kind, opt, id, crossId, pos, hidden) {
+    var v = opt || {};
+    return '<c:' + kind + '><c:axId val="' + id + '"/>' +
+      '<c:scaling><c:orientation val="' + (v.reverse ? 'maxMin' : 'minMax') + '"/>' +
+      (v.max !== undefined && v.max !== null ? '<c:max val="' + v.max + '"/>' : '') +
+      (v.min !== undefined && v.min !== null ? '<c:min val="' + v.min + '"/>' : '') +
+      '</c:scaling><c:delete val="' + (hidden ? 1 : 0) + '"/><c:axPos val="' + pos + '"/>' +
+      (v.grid ? '<c:majorGridlines/>' : '') +
+      '<c:numFmt formatCode="' + x(v.numFmt || 'General') + '" sourceLinked="0"/>' +
+      '<c:majorTickMark val="' + (hidden ? 'none' : 'out') + '"/><c:minorTickMark val="none"/>' +
+      '<c:tickLblPos val="' + (hidden ? 'none' : 'nextTo') + '"/>' + txPr(v.size) +
+      '<c:crossAx val="' + crossId + '"/><c:crosses val="' + (v.crosses || 'autoZero') + '"/>' +
+      (kind === 'catAx' ? '<c:auto val="1"/><c:lblAlgn val="ctr"/><c:lblOffset val="100"/>' +
+        (v.skip ? '<c:tickLblSkip val="' + v.skip + '"/><c:tickMarkSkip val="' + v.skip + '"/>' : '') +
+        '<c:noMultiLvlLbl val="0"/>' : '<c:crossBetween val="' + (v.between || 'between') + '"/>' +
+        (v.unit ? '<c:majorUnit val="' + v.unit + '"/>' : '')) +
+      '</c:' + kind + '>';
   }
 
   function chartXml(ch) {
     var sers = ch.series.map(function (s, i) { return serXml(ch, s, i); }).join('');
+    var plot, axes;
 
-    var plot;
-    if (ch.kind === 'line') {
+    if (ch.kind === 'scatter') {
+      plot = '<c:scatterChart><c:scatterStyle val="lineMarker"/><c:varyColors val="0"/>' + sers +
+        '<c:axId val="' + AX1 + '"/><c:axId val="' + AX2 + '"/></c:scatterChart>';
+      axes = axisXml('valAx', ch.xAx, AX1, AX2, 'b', ch.hideAxes) +
+        axisXml('valAx', ch.yAx, AX2, AX1, 'l', ch.hideAxes);
+    } else if (ch.kind === 'line') {
       plot = '<c:lineChart><c:grouping val="standard"/><c:varyColors val="0"/>' + sers +
-        '<c:marker val="1"/>' +
-        '<c:axId val="' + AX_CAT + '"/><c:axId val="' + AX_VAL + '"/></c:lineChart>';
+        '<c:marker val="1"/><c:axId val="' + AX1 + '"/><c:axId val="' + AX2 + '"/></c:lineChart>';
+      axes = axisXml('catAx', ch.cat, AX1, AX2, 'b', false) +
+        axisXml('valAx', ch.valAx, AX2, AX1, 'l', false);
     } else {
       plot = '<c:barChart><c:barDir val="bar"/><c:grouping val="stacked"/><c:varyColors val="0"/>' + sers +
         '<c:gapWidth val="' + (ch.gapWidth || 40) + '"/><c:overlap val="100"/>' +
-        '<c:axId val="' + AX_CAT + '"/><c:axId val="' + AX_VAL + '"/></c:barChart>';
+        '<c:axId val="' + AX1 + '"/><c:axId val="' + AX2 + '"/></c:barChart>';
+      var catOpt = Object.assign({}, ch.cat, { reverse: ch.reverseCat });
+      var valOpt = Object.assign({ grid: true, crosses: ch.reverseCat ? 'max' : 'autoZero' }, ch.valAx);
+      axes = axisXml('catAx', catOpt, AX1, AX2, 'l', false) +
+        axisXml('valAx', valOpt, AX2, AX1, 'b', false);
     }
 
-    var catAx = '<c:catAx><c:axId val="' + AX_CAT + '"/>' +
-      '<c:scaling><c:orientation val="' + (ch.reverseCat ? 'maxMin' : 'minMax') + '"/></c:scaling>' +
-      '<c:delete val="0"/><c:axPos val="' + (ch.kind === 'line' ? 'b' : 'l') + '"/>' +
-      '<c:numFmt formatCode="' + x(ch.cat.fmt || 'General') + '" sourceLinked="0"/>' +
-      '<c:majorTickMark val="out"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/>' + txPr(ch.catSize) +
-      '<c:crossAx val="' + AX_VAL + '"/><c:crosses val="autoZero"/><c:auto val="1"/>' +
-      '<c:lblAlgn val="ctr"/><c:lblOffset val="100"/>' +
-      (ch.tickLblSkip ? '<c:tickLblSkip val="' + ch.tickLblSkip + '"/><c:tickMarkSkip val="' + ch.tickLblSkip + '"/>' : '') +
-      '<c:noMultiLvlLbl val="0"/></c:catAx>';
-
-    var v = ch.valAx || {};
-    var valAx = '<c:valAx><c:axId val="' + AX_VAL + '"/>' +
-      '<c:scaling><c:orientation val="minMax"/>' +
-      (v.max !== undefined && v.max !== null ? '<c:max val="' + v.max + '"/>' : '') +
-      (v.min !== undefined && v.min !== null ? '<c:min val="' + v.min + '"/>' : '') +
-      '</c:scaling><c:delete val="0"/><c:axPos val="' + (ch.kind === 'line' ? 'l' : 'b') + '"/>' +
-      '<c:majorGridlines/>' +
-      '<c:numFmt formatCode="' + x(v.numFmt || 'General') + '" sourceLinked="0"/>' +
-      '<c:majorTickMark val="out"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/>' + txPr() +
-      '<c:crossAx val="' + AX_CAT + '"/><c:crosses val="' + (ch.reverseCat ? 'max' : 'autoZero') + '"/>' +
-      '<c:crossBetween val="between"/>' +
-      (v.unit ? '<c:majorUnit val="' + v.unit + '"/>' : '') +
-      '</c:valAx>';
+    var layout = ch.full
+      ? '<c:layout><c:manualLayout><c:layoutTarget val="inner"/><c:xMode val="edge"/><c:yMode val="edge"/>' +
+        '<c:x val="0"/><c:y val="0"/><c:w val="1"/><c:h val="1"/></c:manualLayout></c:layout>'
+      : '<c:layout/>';
 
     return HEAD +
       '<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"' +
@@ -340,36 +453,34 @@
       ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
       '<c:lang val="ja-JP"/><c:roundedCorners val="0"/>' +
       '<c:chart>' +
-      (ch.title ? title(ch.title) : '<c:autoTitleDeleted val="1"/>') +
-      '<c:plotArea><c:layout/>' + plot + catAx + valAx +
+      (ch.title ? titleXml(ch.title) : '<c:autoTitleDeleted val="1"/>') +
+      '<c:plotArea>' + layout + plot + axes +
       '<c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr>' +
       '</c:plotArea>' +
-      (ch.legend === false ? '' : '<c:legend><c:legendPos val="b"/><c:overlay val="0"/>' + txPr() + '</c:legend>') +
+      (ch.legend ? '<c:legend><c:legendPos val="b"/><c:overlay val="0"/>' + txPr() + '</c:legend>' : '') +
       '<c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/>' +
       '</c:chart>' +
-      '<c:spPr><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill>' +
-      '<a:ln><a:solidFill><a:srgbClr val="D0D7E2"/></a:solidFill></a:ln></c:spPr>' +
-      '</c:chartSpace>';
+      '<c:spPr>' + (ch.transparent
+        ? '<a:noFill/><a:ln><a:noFill/></a:ln>'
+        : '<a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:ln><a:solidFill><a:srgbClr val="D0D7E2"/></a:solidFill></a:ln>') +
+      '</c:spPr></c:chartSpace>';
   }
 
-  function drawingXml(anchor) {
+  function anchorXml(anchor, rid, id) {
     var a = anchor || {};
-    return HEAD +
-      '<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"' +
-      ' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">' +
-      '<xdr:twoCellAnchor>' +
-      '<xdr:from><xdr:col>' + (a.col || 0) + '</xdr:col><xdr:colOff>0</xdr:colOff>' +
-      '<xdr:row>' + (a.row || 0) + '</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>' +
-      '<xdr:to><xdr:col>' + (a.col2 || 12) + '</xdr:col><xdr:colOff>0</xdr:colOff>' +
-      '<xdr:row>' + (a.row2 || 24) + '</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>' +
+    return '<xdr:twoCellAnchor>' +
+      '<xdr:from><xdr:col>' + (a.col || 0) + '</xdr:col><xdr:colOff>' + (a.colOff || 0) + '</xdr:colOff>' +
+      '<xdr:row>' + (a.row || 0) + '</xdr:row><xdr:rowOff>' + (a.rowOff || 0) + '</xdr:rowOff></xdr:from>' +
+      '<xdr:to><xdr:col>' + (a.col2 || 12) + '</xdr:col><xdr:colOff>' + (a.colOff2 || 0) + '</xdr:colOff>' +
+      '<xdr:row>' + (a.row2 || 24) + '</xdr:row><xdr:rowOff>' + (a.rowOff2 || 0) + '</xdr:rowOff></xdr:to>' +
       '<xdr:graphicFrame macro="">' +
-      '<xdr:nvGraphicFramePr><xdr:cNvPr id="2" name="グラフ"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr>' +
+      '<xdr:nvGraphicFramePr><xdr:cNvPr id="' + id + '" name="グラフ' + id + '"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr>' +
       '<xdr:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/></xdr:xfrm>' +
       '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart">' +
       '<c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"' +
-      ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="rId1"/>' +
+      ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="' + rid + '"/>' +
       '</a:graphicData></a:graphic>' +
-      '</xdr:graphicFrame><xdr:clientData/></xdr:twoCellAnchor></xdr:wsDr>';
+      '</xdr:graphicFrame><xdr:clientData/></xdr:twoCellAnchor>';
   }
 
   /* ------------------------------------------------------------------ *
@@ -377,6 +488,7 @@
    * ------------------------------------------------------------------ */
   X.build = function (spec) {
     var sheets = spec.sheets || [];
+    var styles = new Styles();
     var files = [];
     function add(name, text) { files.push({ name: name, data: utf8(text) }); }
 
@@ -386,29 +498,41 @@
       '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
       '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>';
 
-    var wbSheets = '', wbRels = '';
+    var wbSheets = '', wbRels = '', chartNo = 0;
+
     sheets.forEach(function (sh, i) {
       var n = i + 1;
+      var charts = sh.charts || (sh.chart ? [sh.chart] : []);
+      sh.__drawing = charts.length > 0;
+
       types += '<Override PartName="/xl/worksheets/sheet' + n + '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>';
       wbSheets += '<sheet name="' + x(sh.name || ('Sheet' + n)) + '" sheetId="' + n + '" r:id="rId' + n + '"/>';
       wbRels += '<Relationship Id="rId' + n + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' + n + '.xml"/>';
-      add('xl/worksheets/sheet' + n + '.xml', sheetXml(sh));
+      add('xl/worksheets/sheet' + n + '.xml', sheetXml(sh, styles));
 
-      if (sh.chart) {
-        types += '<Override PartName="/xl/drawings/drawing' + n + '.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>' +
-          '<Override PartName="/xl/charts/chart' + n + '.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>';
-        add('xl/worksheets/_rels/sheet' + n + '.xml.rels', HEAD +
-          '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
-          '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing' + n + '.xml"/>' +
-          '</Relationships>');
-        add('xl/drawings/drawing' + n + '.xml', drawingXml(sh.chart.anchor));
-        add('xl/drawings/_rels/drawing' + n + '.xml.rels', HEAD +
-          '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
-          '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chart' + n + '.xml"/>' +
-          '</Relationships>');
-        add('xl/charts/chart' + n + '.xml', chartXml(sh.chart));
-      }
+      if (!charts.length) return;
+
+      var anchors = '', rels = '';
+      charts.forEach(function (ch, k) {
+        chartNo++;
+        var rid = 'rId' + (k + 1);
+        anchors += anchorXml(ch.anchor, rid, k + 2);
+        rels += '<Relationship Id="' + rid + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chart' + chartNo + '.xml"/>';
+        types += '<Override PartName="/xl/charts/chart' + chartNo + '.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>';
+        add('xl/charts/chart' + chartNo + '.xml', chartXml(ch));
+      });
+      types += '<Override PartName="/xl/drawings/drawing' + n + '.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>';
+      add('xl/worksheets/_rels/sheet' + n + '.xml.rels', HEAD +
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing' + n + '.xml"/>' +
+        '</Relationships>');
+      add('xl/drawings/drawing' + n + '.xml', HEAD +
+        '<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"' +
+        ' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">' + anchors + '</xdr:wsDr>');
+      add('xl/drawings/_rels/drawing' + n + '.xml.rels', HEAD +
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' + rels + '</Relationships>');
     });
+
     types += '</Types>';
 
     add('[Content_Types].xml', types);
@@ -424,7 +548,7 @@
       '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' + wbRels +
       '<Relationship Id="rId' + (sheets.length + 1) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>' +
       '</Relationships>');
-    add('xl/styles.xml', stylesXml());
+    add('xl/styles.xml', styles.xml());
 
     return zip(files);
   };
