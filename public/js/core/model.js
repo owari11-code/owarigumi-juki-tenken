@@ -263,13 +263,22 @@
     return w !== null && w > 0 ? w : 1;
   }
 
-  /** その日に終わっているはずの割合（予定の期間で按分） */
-  M.taskPlanned = function (t, dateStr) {
-    if (!U.isDate(t.planStart) || !U.isDate(t.planEnd)) return 0;
-    if (dateStr < t.planStart) return 0;
-    if (dateStr >= t.planEnd) return 100;
-    var total = U.diffDays(t.planStart, t.planEnd) + 1;
-    var done = U.diffDays(t.planStart, dateStr) + 1;
+  /** 変更後の期間が入っているか */
+  M.hasRev = function (t) { return U.isDate(t.revStart) && U.isDate(t.revEnd); };
+
+  /**
+   * その日に終わっているはずの割合（期間で按分）
+   *   useRev = true なら、変更後の期間で計算する（入っていなければ当初の予定）
+   */
+  M.taskPlanned = function (t, dateStr, useRev) {
+    var rev = useRev && M.hasRev(t);
+    var from = rev ? t.revStart : t.planStart;
+    var to = rev ? t.revEnd : t.planEnd;
+    if (!U.isDate(from) || !U.isDate(to)) return 0;
+    if (dateStr < from) return 0;
+    if (dateStr >= to) return 100;
+    var total = U.diffDays(from, to) + 1;
+    var done = U.diffDays(from, dateStr) + 1;
     return U.clamp(done / total * 100, 0, 100);
   };
 
@@ -277,16 +286,24 @@
     var date = dateStr || U.todayStr();
     var tasks = M.tasks(siteId);
     if (!tasks.length) return { planned: null, actual: null, tasks: tasks, diff: null };
-    var sw = 0, sp = 0, sa = 0;
+    var sw = 0, sp = 0, sa = 0, sr = 0, anyRev = false;
     tasks.forEach(function (t) {
       var w = weight(t);
       sw += w;
       sp += w * M.taskPlanned(t, date);
+      sr += w * M.taskPlanned(t, date, true);
       sa += w * U.clamp(U.num(t.progress) || 0, 0, 100);
+      if (M.hasRev(t)) anyRev = true;
     });
     var planned = Math.round(sp / sw * 10) / 10;
     var actual = Math.round(sa / sw * 10) / 10;
-    return { planned: planned, actual: actual, diff: Math.round((actual - planned) * 10) / 10, tasks: tasks };
+    return {
+      planned: planned,
+      actual: actual,
+      revised: anyRev ? Math.round(sr / sw * 10) / 10 : null,
+      diff: Math.round((actual - (anyRev ? sr / sw : planned)) * 10) / 10,
+      tasks: tasks
+    };
   };
 
   M.progressLabel = function (p) {
@@ -301,8 +318,8 @@
   M.scheduleSpan = function (site, tasks) {
     var from = site.periodFrom, to = site.periodTo;
     tasks.forEach(function (t) {
-      if (U.isDate(t.planStart) && (!from || t.planStart < from)) from = t.planStart;
-      if (U.isDate(t.planEnd) && (!to || t.planEnd > to)) to = t.planEnd;
+      [t.planStart, t.revStart].forEach(function (d) { if (U.isDate(d) && (!from || d < from)) from = d; });
+      [t.planEnd, t.revEnd].forEach(function (d) { if (U.isDate(d) && (!to || d > to)) to = d; });
     });
     return { from: from, to: to };
   };

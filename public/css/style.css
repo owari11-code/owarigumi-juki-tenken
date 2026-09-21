@@ -13,6 +13,7 @@
   --accent-400: #94bce3;    /* 同期ランプ */
   --accent-100: #eef6ff;
   --red: #c62828;           /* 否・要整備のみ */
+  --green: #2f7d62;         /* 変更後の工程 */
   --neutral-600: #7a7a7d;
   --neutral-700: #5d5d60;   /* 該当なし */
   --bg: #f2f2f3;
@@ -986,6 +987,8 @@ tr.unsent td { background: var(--amber-bg); }
 .g-today { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px solid var(--red); opacity: .6; }
 .g-bar { position: absolute; top: 9px; height: 12px; background: rgba(89, 128, 166, .28); border: 1px solid var(--accent); }
 .g-bar.late { border-color: var(--red); background: rgba(198, 40, 40, .14); }
+.g-bar.half { top: 6px; height: 7px; }
+.g-bar.rev { top: 15px; height: 7px; border-color: var(--green); background: rgba(47, 125, 98, .2); }
 .g-done { display: block; height: 100%; background: var(--accent); }
 .g-bar.late .g-done { background: var(--red); }
 .g-row.empty .g-name { color: var(--amber); }
@@ -1020,6 +1023,19 @@ tr.unsent td { background: var(--amber-bg); }
 }
 .ge-name a { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ge-name b { flex: none; font-family: var(--font-num); font-weight: 700; color: var(--muted); }
+.ge-rev {
+  flex: none;
+  width: 21px;
+  height: 21px;
+  padding: 0;
+  font-size: 10.5px;
+  line-height: 1;
+  border: 1px solid var(--divider);
+  background: #fff;
+  color: var(--muted);
+  cursor: pointer;
+}
+.ge-rev.on { background: var(--green); border-color: var(--green); color: #fff; }
 .ge-name b.ok { color: var(--accent); }
 .ge-name.new input {
   flex: 1;
@@ -1097,6 +1113,9 @@ tr.unsent td { background: var(--amber-bg); }
   cursor: grab;
 }
 .ge-bar.late { border-color: var(--red); background: rgba(198, 40, 40, .12); }
+.ge-bar.half { top: 3px; height: 12px; }
+.ge-bar.rev { top: 18px; height: 12px; background: rgba(47, 125, 98, .16); border-color: var(--green); }
+.ge-bar.rev .ge-cap { color: var(--green); text-shadow: none; }
 .ge-bar.temp { border-style: dashed; }
 .ge-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); opacity: .8; pointer-events: none; }
 .ge-bar.late .ge-fill { background: var(--red); }
@@ -1169,6 +1188,8 @@ tr.unsent td { background: var(--amber-bg); }
 .curve .c-actual { fill: none; stroke: var(--accent); stroke-width: 2.5; }
 .curve .c-dot { fill: var(--accent); }
 .curve .c-today { stroke: var(--red); stroke-width: 1.5; opacity: .6; }
+.curve .c-rev { fill: none; stroke: var(--green); stroke-width: 2; stroke-dasharray: 2 3; }
+.lg-rev { color: var(--green); font-weight: 700; }
 .lg-plan { color: #94a3b8; font-weight: 700; }
 .lg-actual { color: var(--accent); font-weight: 700; }
 .progress-table .pct-input { width: 5.5em; min-height: 42px; padding: 6px 8px; text-align: right; }

@@ -83,7 +83,15 @@
     });
     var now = M.progress(site.id);
 
-    var plan = dates.map(function (d) { return M.progress(site.id, d).planned; });
+    var anyRev = false;
+    tasks.forEach(function (t) { if (M.hasRev(t)) anyRev = true; });
+
+    var plan = [], rev = anyRev ? [] : null;
+    dates.forEach(function (d) {
+      var p = M.progress(site.id, d);
+      plan.push(p.planned);
+      if (rev) rev.push(p.revised);
+    });
     var actual = dates.map(function (d) {
       if (d > today) return null;
       if (d === today) return now.actual;
@@ -91,25 +99,39 @@
       logs.forEach(function (l) { if (l.date && l.date <= d) v = U.num(l.actual); });
       return v;
     });
-    return { from: span.from, to: span.to, dates: dates, plan: plan, actual: actual, today: today };
+    return { from: span.from, to: span.to, dates: dates, plan: plan, rev: rev, actual: actual, today: today };
   }
 
   /* ------------------------------------------------------------------ *
    * 工程表（ドラッグで編集できるマス目）
    * ------------------------------------------------------------------ */
   function barHtml(t, r, px, today) {
-    if (!U.isDate(t.planStart) || !U.isDate(t.planEnd)) return '';
-    var left = U.diffDays(r.from, t.planStart) * px;
-    var w = Math.max(px, (U.diffDays(t.planStart, t.planEnd) + 1) * px);
-    var prog = U.clamp(U.num(t.progress) || 0, 0, 100);
-    var late = prog + 0.001 < M.taskPlanned(t, today) - 10;
-    return '<span class="ge-bar' + (late ? ' late' : '') + (prog >= 100 ? ' done' : '') +
-      '" style="left:' + left + 'px;width:' + w + 'px">' +
-      '<span class="ge-fill" style="width:' + prog + '%"></span>' +
-      '<span class="ge-h h-l" title="開始日を変える"></span>' +
-      '<span class="ge-h h-r" title="終了日を変える"></span>' +
-      '<span class="ge-h h-p" style="left:' + prog + '%" title="進捗を変える"></span>' +
-      '<span class="ge-cap' + (prog < 18 ? ' dark' : '') + '">' + U.fmtNum(prog, 0) + '%</span></span>';
+    var rev = M.hasRev(t);
+    var out = '';
+
+    if (U.isDate(t.planStart) && U.isDate(t.planEnd)) {
+      var left = U.diffDays(r.from, t.planStart) * px;
+      var w = Math.max(px, (U.diffDays(t.planStart, t.planEnd) + 1) * px);
+      var prog = U.clamp(U.num(t.progress) || 0, 0, 100);
+      var late = prog + 0.001 < M.taskPlanned(t, today, true) - 10;
+      out += '<span class="ge-bar' + (late ? ' late' : '') + (prog >= 100 ? ' done' : '') + (rev ? ' half' : '') +
+        '" data-kind="plan" style="left:' + left + 'px;width:' + w + 'px">' +
+        '<span class="ge-fill" style="width:' + prog + '%"></span>' +
+        '<span class="ge-h h-l" title="開始日を変える"></span>' +
+        '<span class="ge-h h-r" title="終了日を変える"></span>' +
+        '<span class="ge-h h-p" style="left:' + prog + '%" title="進捗を変える"></span>' +
+        '<span class="ge-cap' + (prog < 18 ? ' dark' : '') + '">' + U.fmtNum(prog, 0) + '%</span></span>';
+    }
+
+    if (rev) {
+      var l2 = U.diffDays(r.from, t.revStart) * px;
+      var w2 = Math.max(px, (U.diffDays(t.revStart, t.revEnd) + 1) * px);
+      out += '<span class="ge-bar rev" data-kind="rev" style="left:' + l2 + 'px;width:' + w2 + 'px">' +
+        '<span class="ge-h h-l" title="変更後の開始日"></span>' +
+        '<span class="ge-h h-r" title="変更後の終了日"></span>' +
+        '<span class="ge-cap dark">変更</span></span>';
+    }
+    return out;
   }
 
   function editorHtml(site, tasks) {
@@ -154,6 +176,8 @@
       var prog = U.clamp(U.num(t.progress) || 0, 0, 100);
       side += '<div class="ge-name" data-task="' + esc(t.id) + '">' +
         '<a href="#/task/' + encodeURIComponent(t.id) + '/edit" title="' + esc(t.name) + '">' + esc(t.name) + '</a>' +
+        '<button class="ge-rev' + (M.hasRev(t) ? ' on' : '') + '" data-rev="' + esc(t.id) +
+        '" title="変更後の工程（緑の帯）">変</button>' +
         '<b class="' + (prog >= 100 ? 'ok' : '') + '">' + U.fmtNum(prog, 0) + '%</b></div>';
       tracks += '<div class="ge-track" data-task="' + esc(t.id) + '">' + barHtml(t, r, px, today) + '</div>';
     });
@@ -176,7 +200,7 @@
         return '<button class="ge-z' + (k === z ? ' on' : '') + '" data-zoom="' + k + '">' +
           (k === 'day' ? '日' : k === 'week' ? '週' : '月') + '</button>';
       }).join('') + '</span>' +
-      '<span class="legend">帯＝予定期間　濃い部分＝進捗　赤い帯＝10ポイント以上の遅れ　縦線＝今日</span>' +
+      '<span class="legend">帯＝予定期間　濃い部分＝進捗　<span class="lg-rev">緑</span>＝変更後の工程（「変」で作る）　赤い帯＝10ポイント以上の遅れ　縦線＝今日</span>' +
       '</div>';
   }
 
@@ -233,11 +257,14 @@
       }
 
       var d0 = dayAt(e.clientX, track);
-      var s0 = task && U.isDate(task.planStart) ? U.diffDays(gFrom, task.planStart) : d0;
-      var e0 = task && U.isDate(task.planEnd) ? U.diffDays(gFrom, task.planEnd) : d0;
+      var kind = bar ? (bar.getAttribute('data-kind') || 'plan') : 'plan';
+      var bs = task ? (kind === 'rev' ? task.revStart : task.planStart) : null;
+      var be = task ? (kind === 'rev' ? task.revEnd : task.planEnd) : null;
+      var s0 = U.isDate(bs) ? U.diffDays(gFrom, bs) : d0;
+      var e0 = U.isDate(be) ? U.diffDays(gFrom, be) : d0;
 
       drag = {
-        mode: mode, track: track, task: task, bar: bar,
+        mode: mode, kind: kind, track: track, task: task, bar: bar,
         grabDay: d0, s0: s0, e0: e0,
         start: mode === 'create' ? d0 : s0,
         end: mode === 'create' ? d0 : e0,
@@ -306,6 +333,9 @@
           if (d.prog > 0 && !d.task.actualStart) d.task.actualStart = U.todayStr();
           if (d.prog >= 100 && !d.task.actualEnd) d.task.actualEnd = U.todayStr();
           if (d.prog < 100) d.task.actualEnd = d.task.actualEnd || '';
+        } else if (d.kind === 'rev') {
+          d.task.revStart = ps;
+          d.task.revEnd = pe;
         } else {
           d.task.planStart = ps;
           d.task.planEnd = pe;
@@ -344,6 +374,28 @@
       MT.rerender();
     }
 
+    U.qsa('.ge-rev', box).forEach(function (b) {
+      b.addEventListener('click', function (e) {
+        e.preventDefault();
+        var t = Store.get('tasks', b.getAttribute('data-rev'));
+        if (!t) return;
+        if (M.hasRev(t)) {
+          if (!confirm('「' + t.name + '」の変更後の工程を取り消します。よろしいですか？')) return;
+          t.revStart = '';
+          t.revEnd = '';
+          U.toast('変更を取り消しました');
+        } else {
+          if (!U.isDate(t.planStart) || !U.isDate(t.planEnd)) return U.toast('先に予定の期間を決めてください');
+          t.revStart = t.planStart;
+          t.revEnd = t.planEnd;
+          U.toast('変更の帯（緑）を作りました。ドラッグして期間を合わせてください');
+        }
+        Store.put('tasks', t);
+        snapshot(site.id);
+        MT.rerender();
+      });
+    });
+
     U.on('#ge-add', 'click', addByName);
     U.on('#ge-new', 'keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); addByName(); } });
   }
@@ -375,9 +427,14 @@
         var l = pos(t.planStart);
         var w = Math.max(0.6, pos(U.addDays(t.planEnd, 1)) - l);
         var prog = U.clamp(U.num(t.progress) || 0, 0, 100);
-        var late = prog + 0.001 < M.taskPlanned(t, today) - 10;
-        bar = '<span class="g-bar' + (late ? ' late' : '') + '" style="left:' + l + '%;width:' + w + '%">' +
+        var late = prog + 0.001 < M.taskPlanned(t, today, true) - 10;
+        bar = '<span class="g-bar' + (late ? ' late' : '') + (M.hasRev(t) ? ' half' : '') + '" style="left:' + l + '%;width:' + w + '%">' +
           '<span class="g-done" style="width:' + prog + '%"></span></span>';
+      }
+      if (M.hasRev(t)) {
+        var l2 = pos(t.revStart);
+        var w2 = Math.max(0.6, pos(U.addDays(t.revEnd, 1)) - l2);
+        bar += '<span class="g-bar rev" style="left:' + l2 + '%;width:' + w2 + '%"></span>';
       }
       return '<div class="g-row"><div class="g-name">' + esc(t.name) +
         '<span class="g-pct">' + U.fmtNum(U.num(t.progress) || 0, 0) + '%</span></div>' +
@@ -387,7 +444,7 @@
     return '<div class="gantt print">' +
       '<div class="g-row g-head"><div class="g-name">工種</div><div class="g-track">' + ticks + '</div></div>' +
       rows + '</div>' +
-      '<p class="legend">帯＝予定期間　濃い部分＝進捗（実績）　赤い帯＝予定より10ポイント以上遅れ　縦線＝今日</p>';
+      '<p class="legend">帯＝予定期間　濃い部分＝進捗（実績）　緑＝変更後の工程　赤い帯＝10ポイント以上の遅れ　縦線＝今日</p>';
   }
 
   /* ------------------------------------------------------------------ *
@@ -402,6 +459,7 @@
     function y(p) { return T + (1 - U.clamp(p, 0, 100) / 100) * (H - T - B); }
 
     var plan = c.dates.map(function (d, i) { return x(d).toFixed(1) + ',' + y(c.plan[i]).toFixed(1); });
+    var revPts = c.rev ? c.dates.map(function (d, i) { return x(d).toFixed(1) + ',' + y(c.rev[i]).toFixed(1); }) : null;
     var act = [], dots = '';
     c.dates.forEach(function (d, i) {
       if (c.actual[i] === null || c.actual[i] === undefined) return;
@@ -419,10 +477,13 @@
 
     return '<svg class="curve" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="出来高曲線">' + grid + todayLine +
       '<polyline points="' + plan.join(' ') + '" class="c-plan"/>' +
+      (revPts ? '<polyline points="' + revPts.join(' ') + '" class="c-rev"/>' : '') +
       (act.length > 1 ? '<polyline points="' + act.join(' ') + '" class="c-actual"/>' : '') + dots +
       '<text x="' + L + '" y="' + (H - 6) + '" class="c-label">' + esc(U.formatShort(c.from)) + '</text>' +
       '<text x="' + (W - R) + '" y="' + (H - 6) + '" class="c-label" text-anchor="end">' + esc(U.formatShort(c.to)) + '</text>' +
-      '</svg><p class="legend"><span class="lg-plan">―</span> 予定　<span class="lg-actual">●―</span> 実績</p>';
+      '</svg><p class="legend"><span class="lg-plan">―</span> 予定　' +
+      (revPts ? '<span class="lg-rev">―</span> 変更　' : '') +
+      '<span class="lg-actual">●―</span> 実績</p>';
   }
 
   /* ------------------------------------------------------------------ *
@@ -443,11 +504,11 @@
     return '令和' + (n === 1 ? '元' : n) + '年度';
   }
 
-  /** 実績の帯の終わり（予定期間のうち、進捗のぶんだけ塗る） */
-  function actualEnd(t, prog) {
-    var dur = U.diffDays(t.planStart, t.planEnd) + 1;
+  /** 実績の帯の終わり（基準の期間のうち、進捗のぶんだけ引く） */
+  function actualEnd(baseStart, baseEnd, prog, drawStart) {
+    var dur = U.diffDays(baseStart, baseEnd) + 1;
     var len = Math.max(1, Math.round(dur * prog / 100));
-    return U.addDays(t.planStart, len - 1);
+    return U.addDays(drawStart || baseStart, len - 1);
   }
 
   function toExcel(site, tasks) {
@@ -624,11 +685,19 @@
     put(R_HEAD + 1, C_NOTE, { s: TH });
     put(R_HEAD + 2, C_NOTE, { s: TH });
 
-    /* ---- 種別ごとに3行 ---- */
-    var blockTop = R_BODY;
+    /* ---- 種別ごとに3行（変更後の工程があるときは4行） ---- */
+    var anyRev = false;
+    tasks.forEach(function (t) { if (M.hasRev(t)) anyRev = true; });
+    var BLK = anyRev ? 4 : 3;      // 予定／（変更）／実績／区切り
+    var LAST = BLK - 1;            // 区切りの行
+    var GREEN = '00A650';
+    var CAP_G = { sz: 6.5, color: GREEN, align: { h: 'left', v: 'center' } };
+
     tasks.forEach(function (t, k) {
-      var r0 = R_BODY + k * 3;
-      row(10); row(10); row(3);
+      var r0 = R_BODY + k * BLK;
+      var q;
+      for (q = 0; q < LAST; q++) row(10);
+      row(3);
 
       var ratio = ratioOf(t);
       var left = [
@@ -640,48 +709,55 @@
       left.forEach(function (c) {
         var v = c[1];
         put(r0, c[0], typeof v === 'object' && v !== null ? v : { text: v, s: c[2] });
-        put(r0 + 1, c[0], { s: c[2] });
-        put(r0 + 2, c[0], { s: { sz: 9, border: { l: 'thin', r: 'thin', b: 'thin' } } });
-        merge(r0, c[0], r0 + 2, c[0]);
+        for (var j = 1; j < LAST; j++) put(r0 + j, c[0], { s: c[2] });
+        put(r0 + LAST, c[0], { s: { sz: 9, border: { l: 'thin', r: 'thin', b: 'thin' } } });
+        merge(r0, c[0], r0 + LAST, c[0]);
       });
+
       // 工種（大分類）は、同じものが続くあいだ1つにまとめる
       var prev = k ? (tasks[k - 1].group || '') : null;
       var cur = t.group || '';
       put(r0, 0, { text: (k && cur && cur === prev) ? '' : cur, s: TD });
-      put(r0 + 1, 0, { s: TD });
-      put(r0 + 2, 0, { s: { sz: 9, border: { l: 'thin', r: 'thin', b: (k + 1 < n && cur && (tasks[k + 1].group || '') === cur) ? null : 'thin' } } });
+      for (q = 1; q < LAST; q++) put(r0 + q, 0, { s: TD });
+      put(r0 + LAST, 0, { s: { sz: 9, border: { l: 'thin', r: 'thin', b: (k + 1 < n && cur && (tasks[k + 1].group || '') === cur) ? null : 'thin' } } });
       put(r0, 5, { s: { sz: 7 } });
 
-      // 区切り線（マス目の下端）
-      for (var i = 0; i < days; i++) put(r0 + 2, C_DAY + i, { s: dayCell(i, { b: 'thin' }) });
+      // マス目の罫線（下端の区切りと、月の区切り）
+      var i;
+      for (i = 0; i < days; i++) put(r0 + LAST, C_DAY + i, { s: dayCell(i, { b: 'thin' }) });
       for (i = 0; i < days; i++) {
-        if (isMonthStart(i)) { put(r0, C_DAY + i, { s: dayCell(i) }); put(r0 + 1, C_DAY + i, { s: dayCell(i) }); }
+        if (!isMonthStart(i)) continue;
+        for (q = 0; q < LAST; q++) put(r0 + q, C_DAY + i, { s: dayCell(i) });
       }
+
       put(r0, C_NOTE, { text: t.note || '', s: NOTE });
-      put(r0 + 1, C_NOTE, { s: NOTE });
-      put(r0 + 2, C_NOTE, { s: { sz: 8, border: { l: 'thin', r: 'thin', b: 'thin' } } });
+      for (q = 1; q < LAST; q++) put(r0 + q, C_NOTE, { s: NOTE });
+      put(r0 + LAST, C_NOTE, { s: { sz: 8, border: { l: 'thin', r: 'thin', b: 'thin' } } });
 
-      if (!U.isDate(t.planStart) || !U.isDate(t.planEnd)) return;
-
-      // 予定（黒）
-      var s1 = U.clamp(U.diffDays(from, t.planStart), 0, days - 1);
-      var e1 = U.clamp(U.diffDays(from, t.planEnd), 0, days - 1);
-      for (i = s1; i <= e1; i++) {
-        put(r0, C_DAY + i, { s: { sz: 6.5, border: { l: isMonthStart(i) ? 'thin' : null, b: { s: 'thick', c: '000000' } } } });
+      /** 帯を1本引く（太い下罫線で描き、右隣に出来高を書く） */
+      function drawBar(ri, ds, de, color, label, lstyle) {
+        if (!U.isDate(ds) || !U.isDate(de)) return;
+        var a = U.clamp(U.diffDays(from, ds), 0, days - 1);
+        var b = U.clamp(U.diffDays(from, de), a, days - 1);
+        for (var j = a; j <= b; j++) {
+          put(ri, C_DAY + j, { s: { sz: 6.5, border: { l: isMonthStart(j) ? 'thin' : null, b: { s: 'thick', c: color } } } });
+        }
+        if (label && b + 1 < days) put(ri, C_DAY + b + 1, { text: label, s: lstyle });
       }
-      if (e1 + 1 < days) put(r0, C_DAY + e1 + 1, { text: '100(' + (Math.round(ratio * 100) / 100) + ')', s: CAP });
 
-      // 実績（赤）
+      var whole = '100(' + (Math.round(ratio * 100) / 100) + ')';
+      drawBar(r0, t.planStart, t.planEnd, '000000', whole, CAP);
+      if (anyRev && M.hasRev(t)) drawBar(r0 + 1, t.revStart, t.revEnd, GREEN, whole, CAP_G);
+
+      // 実績（赤）。変更後の工程があれば、そちらを基準にする
       var prog = U.clamp(U.num(t.progress) || 0, 0, 100);
       if (prog > 0) {
-        var ae = actualEnd(t, prog);
-        var s2 = U.clamp(U.diffDays(from, t.actualStart && U.isDate(t.actualStart) ? t.actualStart : t.planStart), 0, days - 1);
-        var e2 = U.clamp(U.diffDays(from, ae), s2, days - 1);
-        for (i = s2; i <= e2; i++) {
-          put(r0 + 1, C_DAY + i, { s: { sz: 6.5, border: { l: isMonthStart(i) ? 'thin' : null, b: { s: 'thick', c: 'C00000' } } } });
-        }
-        if (e2 + 1 < days) {
-          put(r0 + 1, C_DAY + e2 + 1, { text: prog + '(' + (Math.round(ratio * prog) / 100) + ')', s: CAP_R });
+        var bs = M.hasRev(t) ? t.revStart : t.planStart;
+        var be = M.hasRev(t) ? t.revEnd : t.planEnd;
+        if (U.isDate(bs) && U.isDate(be)) {
+          var st = U.isDate(t.actualStart) ? t.actualStart : bs;
+          drawBar(r0 + (anyRev ? 2 : 1), st, actualEnd(bs, be, prog, st), 'C00000',
+            prog + '(' + (Math.round(ratio * prog) / 100) + ')', CAP_R);
         }
       }
     });
@@ -693,20 +769,23 @@
         var cur = k < n ? (tasks[k].group || '') : null;
         var prev = tasks[start].group || '';
         if (cur !== prev || k === n) {
-          if (prev && k - start > 1) merge(R_BODY + start * 3, 0, R_BODY + (k - 1) * 3 + 2, 0);
-          else if (k - start === 1) merge(R_BODY + start * 3, 0, R_BODY + start * 3 + 2, 0);
+          if (prev && k - start > 1) merge(R_BODY + start * BLK, 0, R_BODY + (k - 1) * BLK + LAST, 0);
+          else if (k - start === 1) merge(R_BODY + start * BLK, 0, R_BODY + start * BLK + LAST, 0);
           start = k;
         }
       }
     })();
 
-    var bodyRows = Math.max(1, n * 3);
+    var bodyRows = Math.max(1, n * BLK);
     var R_END = R_BODY + bodyRows;          // 種別の次の行
 
     /* ---- 左の目盛（0〜100%） ---- */
     (function () {
       var hs = [];
-      tasks.forEach(function () { hs.push(10, 10, 3); });
+      tasks.forEach(function () {
+        for (var q = 0; q < LAST; q++) hs.push(10);
+        hs.push(3);
+      });
       var H = 0, used = {};
       hs.forEach(function (h) { H += h; });
       for (var p = 100; p >= 0; p -= 10) {
@@ -781,45 +860,78 @@
     merge(rNote, 2, rNote, C_NOTE);
 
     /* ---- 凡例（摘要の欄） ---- */
+    function lgRow(text, color, style, w) {
+      return [text, {
+        sz: 8, color: color || '000000', align: { v: 'center' },
+        border: { l: 'thin', r: 'thin', b: style ? { s: style, c: color || '000000' } : null }
+      }];
+    }
     var lg = [
       ['凡例', { sz: 8, b: true, align: { v: 'center' }, border: { l: 'thin', r: 'thin' } }],
       ['施工進度管理', { sz: 8, align: { v: 'center' }, border: { l: 'thin', r: 'thin' } }],
-      ['　予定', { sz: 8, align: { v: 'center' }, border: { l: 'thin', r: 'thin', b: { s: 'thick', c: '000000' } } }],
-      ['　実績', { sz: 8, color: 'C00000', align: { v: 'center' }, border: { l: 'thin', r: 'thin', b: { s: 'thick', c: 'C00000' } } }],
-      ['', { sz: 8, border: { l: 'thin', r: 'thin' } }],
-      ['全体工程管理', { sz: 8, align: { v: 'center' }, border: { l: 'thin', r: 'thin' } }],
-      ['　予定（曲線）', { sz: 8, align: { v: 'center' }, border: { l: 'thin', r: 'thin', b: { s: 'medium', c: '000000' } } }],
-      ['　実績（曲線）', { sz: 8, color: 'C00000', align: { v: 'center' }, border: { l: 'thin', r: 'thin', b: { s: 'medium', c: 'C00000' } } }]
+      lgRow('　予定', '000000', 'thick')
     ];
-    var lgStep = bodyRows >= lg.length * 3 ? 3 : (bodyRows >= lg.length * 2 ? 2 : 1);
+    if (anyRev) lg.push(lgRow('　変更', GREEN, 'thick'));
+    lg.push(lgRow('　実績', 'C00000', 'thick'));
+    lg.push(['', { sz: 8, border: { l: 'thin', r: 'thin' } }]);
+    lg.push(['全体工程管理', { sz: 8, align: { v: 'center' }, border: { l: 'thin', r: 'thin' } }]);
+    lg.push(lgRow('　予定（曲線）', '000000', 'medium'));
+    if (anyRev) lg.push(lgRow('　変更（曲線）', GREEN, 'medium'));
+    lg.push(lgRow('　実績（曲線）', 'C00000', 'medium'));
+
+    // 区切りの行（高さ3）は避けて置く
+    var lgRows = [];
+    tasks.forEach(function (t, k) {
+      for (var q = 0; q < LAST; q++) lgRows.push(R_BODY + k * BLK + q);
+    });
+    var lgStep = Math.max(1, Math.floor(lgRows.length / lg.length));
     lg.forEach(function (item, k) {
-      var ri = R_BODY + k * lgStep;
-      if (ri < R_END) put(ri, C_NOTE, { text: item[0], s: item[1] });
+      var ri = lgRows[k * lgStep];
+      if (ri !== undefined) put(ri, C_NOTE, { text: item[0], s: item[1] });
     });
 
     /* ---- 出来形（別シート・曲線のもと） ---- */
     var c = curveData(site, tasks);
-    var rows2 = [[{ text: '日付', bold: true }, { text: '予定(%)', bold: true }, { text: '実績(%)', bold: true }]];
-    var sheet2 = { name: '出来形', freezeTop: true, cols: [{ w: 12 }, { w: 10 }, { w: 10 }], rows: rows2 };
-    var xs = [], ys = [], as = [];
+    var hasRev = !!(c && c.rev);
+    var head2 = [{ text: '日付', bold: true }, { text: '予定(%)', bold: true }];
+    if (hasRev) head2.push({ text: '変更(%)', bold: true });
+    head2.push({ text: '実績(%)', bold: true });
+
+    var rows2 = [head2];
+    var cols2 = [{ w: 12 }, { w: 10 }];
+    if (hasRev) cols2.push({ w: 10 });
+    cols2.push({ w: 10 });
+    var sheet2 = { name: '出来形', freezeTop: true, cols: cols2, rows: rows2 };
+
+    var xs = [], ys = [], rs = [], as = [];
+    var COL_REV = 'C', COL_ACT = hasRev ? 'D' : 'C';
     if (c) {
       c.dates.forEach(function (d, i) {
-        rows2.push([{ date: d }, { pct: c.plan[i] }, c.actual[i] === null ? '' : { pct: c.actual[i] }]);
+        var line = [{ date: d }, { pct: c.plan[i] }];
+        if (hasRev) line.push({ pct: c.rev[i] });
+        line.push(c.actual[i] === null ? '' : { pct: c.actual[i] });
+        rows2.push(line);
         xs.push(XL.dateSerial(d));
         ys.push(c.plan[i]);
+        if (hasRev) rs.push(c.rev[i]);
         as.push(c.actual[i]);
       });
       var last2 = c.dates.length + 1;
+      var lineSeries = [
+        { name: '予定', nameRef: '$B$1', ref: '$B$2:$B$' + last2, values: ys, color: '8E9AAF', fmt: '0.0"%"' }
+      ];
+      if (hasRev) {
+        lineSeries.push({ name: '変更', nameRef: '$C$1', ref: '$C$2:$C$' + last2, values: rs, color: GREEN, fmt: '0.0"%"' });
+      }
+      lineSeries.push({ name: '実績', nameRef: '$' + COL_ACT + '$1', ref: '$' + COL_ACT + '$2:$' + COL_ACT + '$' + last2, values: as, color: 'C0392B', marker: 'circle', fmt: '0.0"%"' });
+
       sheet2.chart = {
         kind: 'line', sheet: '出来形', legend: true,
         title: '出来形（全体進捗率）　' + site.name,
-        anchor: { col: 4, row: 0, col2: 20, row2: 26 },
+        anchor: { col: hasRev ? 5 : 4, row: 0, col2: hasRev ? 21 : 20, row2: 26 },
         cat: { ref: '$A$2:$A$' + last2, values: xs, fmt: 'm/d' },
         valAx: { min: 0, max: 100, numFmt: '0"%"', unit: 20, grid: true },
-        series: [
-          { name: '予定', nameRef: '$B$1', ref: '$B$2:$B$' + last2, values: ys, color: '8E9AAF', fmt: '0.0"%"' },
-          { name: '実績', nameRef: '$C$1', ref: '$C$2:$C$' + last2, values: as, color: 'C0392B', marker: 'circle', fmt: '0.0"%"' }
-        ]
+        series: lineSeries
       };
     }
 
@@ -827,15 +939,20 @@
     var charts = [];
     if (c && n) {
       var lastRow = c.dates.length + 1;
+      var over = [
+        { name: '予定', sheet: '出来形', xRef: '$A$2:$A$' + lastRow, xValues: xs, yRef: '$B$2:$B$' + lastRow, yValues: ys, color: '000000', width: 12700 }
+      ];
+      if (hasRev) {
+        over.push({ name: '変更', sheet: '出来形', xRef: '$A$2:$A$' + lastRow, xValues: xs, yRef: '$' + COL_REV + '$2:$' + COL_REV + '$' + lastRow, yValues: rs, color: GREEN, width: 12700 });
+      }
+      over.push({ name: '実績', sheet: '出来形', xRef: '$A$2:$A$' + lastRow, xValues: xs, yRef: '$' + COL_ACT + '$2:$' + COL_ACT + '$' + lastRow, yValues: as, color: 'C00000', width: 12700 });
+
       charts.push({
         kind: 'scatter', sheet: '出来形', full: true, transparent: true, hideAxes: true, legend: false,
         anchor: { col: C_DAY, row: R_BODY, col2: C_DAY + days, row2: R_END },
         xAx: { min: XL.dateSerial(from), max: XL.dateSerial(to) + 1 },
         yAx: { min: 0, max: 100 },
-        series: [
-          { name: '予定', sheet: '出来形', xRef: '$A$2:$A$' + lastRow, xValues: xs, yRef: '$B$2:$B$' + lastRow, yValues: ys, color: '000000', width: 12700 },
-          { name: '実績', sheet: '出来形', xRef: '$A$2:$A$' + lastRow, xValues: xs, yRef: '$C$2:$C$' + lastRow, yValues: as, color: 'C00000', width: 12700 }
-        ]
+        series: over
       });
     }
 
@@ -972,6 +1089,9 @@
       UI.field('予定（終了）', UI.date('f-pe', task.planEnd || site.periodTo), true) + '</div>' +
       '<div class="field-row">' + UI.field('重み', UI.number('f-weight', task.weight, ' step="any" min="0"'), false, '金額の構成比など。空欄なら均等') +
       UI.field('進捗（%）', UI.number('f-progress', U.num(task.progress) || 0, ' step="1" min="0" max="100"')) + '</div>' +
+      '<div class="field-row">' +
+      UI.field('変更（開始）', UI.date('f-rs', task.revStart), false, '工程を組み替えたときに入れます（緑の帯）') +
+      UI.field('変更（終了）', UI.date('f-re', task.revEnd)) + '</div>' +
       '<div class="field-row">' + UI.field('実績（開始）', UI.date('f-as', task.actualStart)) + UI.field('実績（終了）', UI.date('f-ae', task.actualEnd)) + '</div>' +
       UI.field('備考', UI.textarea('f-note', task.note)) +
       '</div>' +
@@ -993,6 +1113,10 @@
       task.planEnd = pe;
       task.weight = U.num(U.val('#f-weight'));
       task.progress = prog;
+      var rs = U.val('#f-rs'), re = U.val('#f-re');
+      if (rs && re && rs > re) return U.toast('変更の終了日は開始日より後にしてください');
+      task.revStart = rs && re ? rs : '';
+      task.revEnd = rs && re ? re : '';
       task.actualStart = U.val('#f-as');
       task.actualEnd = U.val('#f-ae');
       task.note = U.val('#f-note');
