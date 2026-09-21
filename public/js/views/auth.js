@@ -54,6 +54,14 @@
       '</div>' +
       UI.alert('info', '<strong>現場の方はログイン不要です。</strong>現場に掲示されたQRコード、または機械・資材に貼られたQRコードを読み取ってください。') +
       UI.btnRow('<a class="btn secondary" href="#/scan">■ QRを読み取る</a>') +
+      '<details class="help"><summary>ID・パスワードが分からないとき</summary>' +
+      '<p><strong>ほかの管理者がいる場合</strong><br>その人に <strong>設定 → 事務所アカウントの管理</strong> を開いてもらい、' +
+      'あなたのアカウントの「パスワードを再発行」を押してもらってください。仮パスワードが表示されます。</p>' +
+      '<p><strong>管理者も入れない場合</strong><br>Supabase の管理画面（SQL Editor）から、仮パスワードを発行できます。' +
+      '手順は <strong>sql/recover.sql</strong>（手順書の「ログインできないとき」）にあります。' +
+      'この操作ができるのは、Supabase にログインできる人だけです。</p>' +
+      '<p class="muted">保存してあるパスワードは暗号化されていて、元の文字に戻すことはできません。' +
+      '思い出すのではなく、新しいものに作り直す形になります。</p></details>' +
       '<p class="muted" id="setup-link"></p>';
 
     Api.setupStatus().then(function (s) {
