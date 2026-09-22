@@ -81,7 +81,7 @@
     return tsLoading;
   }
 
-  function turnstileToken() {
+  function turnstileToken(isRetry) {
     var siteKey = config().siteKey;
     if (!siteKey) return Promise.resolve('');
     return loadTurnstile().then(function () {
@@ -94,12 +94,16 @@
         document.body.appendChild(overlay);
         var done = false;
         var widgetId = null;
-        function finish(fn, arg) {
-          if (done) return;
+        function cleanup() {
+          if (done) return false;
           done = true;
           clearTimeout(timer);
           try { if (widgetId !== null) global.turnstile.remove(widgetId); } catch (e) { /* 無視 */ }
           if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+          return true;
+        }
+        function finish(fn, arg) {
+          if (!cleanup()) return;
           fn(arg);
         }
         var timer = setTimeout(function () {
@@ -110,8 +114,16 @@
             sitekey: siteKey,
             appearance: 'interaction-only',
             callback: function (token) { finish(resolve, token); },
-            'error-callback': function () {
-              finish(reject, new ApiError(0, 'turnstile_failed', '安全確認に失敗しました。もう一度お試しください。'));
+            'error-callback': function (code) {
+              // 一時的な失敗が多いので、まず1回だけ自動でやり直す
+              if (!isRetry) {
+                if (!cleanup()) return;
+                setTimeout(function () { turnstileToken(true).then(resolve, reject); }, 800);
+                return;
+              }
+              finish(reject, new ApiError(0, 'turnstile_blocked',
+                '安全確認の画面を表示できませんでした' + (code ? '（コード ' + code + '）' : '') +
+                '。通信環境をご確認ください。社内の設定で challenges.cloudflare.com への通信が遮断されていると、この表示になります。'));
             },
             'expired-callback': function () {
               finish(reject, new ApiError(0, 'turnstile_expired', '安全確認の有効時間が切れました。もう一度お試しください。'));

@@ -25,7 +25,13 @@ export async function verifyTurnstile(request, env, token) {
     return { ok: false, code: 'turnstile_unreachable', message: '安全確認のサーバーに接続できませんでした。' };
   }
   if (!verdict || verdict.success !== true) {
-    return { ok: false, code: 'turnstile_failed', message: '安全確認に失敗しました。もう一度お試しください。' };
+    // どれで弾かれたか分かるよう、Cloudflare の理由をそのまま添える
+    const codes = (verdict && verdict['error-codes'] ? verdict['error-codes'] : []).join(' / ').slice(0, 120);
+    return {
+      ok: false,
+      code: 'turnstile_failed',
+      message: '安全確認が通りませんでした。もう一度お試しください。' + (codes ? '（理由：' + codes + '）' : '')
+    };
   }
   return { ok: true };
 }
