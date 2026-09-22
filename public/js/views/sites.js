@@ -14,7 +14,7 @@
   var A = MT.assets;
   var esc = U.esc;
 
-  var TAB_ORDER = ['overview', 'inspect', 'materials', 'machines', 'schedule', 'staff', 'qr'];
+  var TAB_ORDER = ['overview', 'inspect', 'ky', 'entrant', 'materials', 'machines', 'schedule', 'staff', 'qr'];
 
   /* ------------------------------------------------------------------ *
    * 一覧
@@ -269,6 +269,9 @@
     var html = '<div class="site-title"><div class="st-name">' + esc(site.name) + '</div>' +
       '<div class="st-sub">' + esc(U.formatDate(U.todayStr())) + '（' + U.weekday(U.todayStr()) + '）</div></div>';
 
+    // 朝いちばんに使うものから並べる
+    if (MT.kyFieldSection) html += MT.kyFieldSection(site);
+
     var any = false;
     Cat.ORDER.forEach(function (catId) {
       var cat = Cat.get(catId);
@@ -325,6 +328,7 @@
     }
 
     if (!any) html += UI.empty('この現場には、まだ記録の対象が登録されていません。事務所にご確認ください。');
+    if (MT.entrantFieldSection) html += MT.entrantFieldSection(site);
     html += UI.btnRow('<a class="btn secondary" href="#/scan">■ ほかのQRを読み取る</a>');
     U.app().innerHTML = html;
   }

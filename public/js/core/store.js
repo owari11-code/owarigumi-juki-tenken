@@ -17,7 +17,8 @@
 
   var KINDS = [
     'sites', 'machines', 'targets', 'inspections', 'materials', 'stock_logs', 'machine_logs',
-    'tools', 'lends', 'tasks', 'progress_logs', 'staff', 'assignments'
+    'tools', 'lends', 'tasks', 'progress_logs', 'staff', 'assignments',
+    'ky', 'entrants'
   ];
 
   var maps = {};
@@ -359,6 +360,22 @@
     return n;
   }
 
+  /**
+   * 1件だけを、この端末からだけ消す（サーバーには何も送らない）。
+   * 新規入場者調査票のように、送ったあと端末に残したくないものに使う。
+   * 未送信のものは消さない。
+   */
+  function forget(kind, id) {
+    var o = maps[kind] && maps[kind].get(id);
+    if (!o || o._dirty) return false;
+    maps[kind]['delete'](id);
+    dirtyKeys.add(kind + '|' + id);
+    cache[kind] = null;
+    scheduleFlush();
+    notify(false);
+    return true;
+  }
+
   function counts() {
     var c = {};
     KINDS.forEach(function (k) { c[k] = built(k).list.length; });
@@ -397,6 +414,7 @@
     setMeta: setMeta,
     clear: clear,
     purgeSite: purgeSite,
+    forget: forget,
     counts: counts,
     onChange: onChange,
     flush: flush,

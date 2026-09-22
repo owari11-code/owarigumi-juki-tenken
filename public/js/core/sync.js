@@ -14,7 +14,7 @@
   var Api = global.MT.api;
   var Session = global.MT.session;
 
-  var FIELD_WRITE_KINDS = ['inspections', 'stock_logs', 'machine_logs', 'lends'];
+  var FIELD_WRITE_KINDS = ['inspections', 'stock_logs', 'machine_logs', 'lends', 'ky', 'entrants'];
   var POLL_MS = 30000;
   var PUSH_DELAY_MS = 1200;
   var MAX_PUSH = 150;

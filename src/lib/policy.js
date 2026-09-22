@@ -22,14 +22,17 @@ export const ADMIN_KINDS = [
   'tasks',          // 工程（工種）
   'progress_logs',  // 進捗率の記録
   'staff',          // 社員
-  'assignments'     // 人員配置
+  'assignments',    // 人員配置
+  'ky',             // リスクアセスメントKY活動表
+  'entrants'        // 新規入場者調査票（個人情報。現場へは渡さない）
 ];
 
 /* 現場（QR）が読める種別。siteId がQRの現場のものだけ */
 export const FIELD_SITE_KINDS = ['machines', 'targets', 'materials', 'stock_logs', 'machine_logs'];
 /* 資機材置場のQRで読める種別 */
 export const FIELD_DEPOT_KINDS = ['tools', 'lends'];
-/* 点検記録は、直近の分だけ渡す */
+/* 点検記録とKY活動表は、直近の分だけ渡す */
+export const FIELD_RECENT_KINDS = ['inspections', 'ky'];
 export const FIELD_INSPECTION_DAYS = 62;
 
 /*
@@ -40,14 +43,18 @@ export const FIELD_WRITE = {
   inspections: { refs: [['targetId', ['machines', 'targets']], ['machineId', ['machines']]] },
   stock_logs: { refs: [['materialId', ['materials']]] },
   machine_logs: { refs: [['machineId', ['machines']]] },
-  lends: { refs: [['toolId', ['tools']]], depot: true }
+  lends: { refs: [['toolId', ['tools']]], depot: true },
+  ky: { refs: [] },
+  // 新規入場者調査票は「書けるが読めない」。現場の端末に個人情報を残さないため、
+  // FIELD_SITE_KINDS にも FIELD_RECENT_KINDS にも入れない。
+  entrants: { refs: [] }
 };
 
 /* siteId を持たない種別（それ以外は必須） */
 const NO_SITE_KINDS = ['sites', 'staff'];
 
 const DEFAULT_ROW_LIMIT = 32 * 1024;
-const ROW_LIMIT = { inspections: 64 * 1024 };
+const ROW_LIMIT = { inspections: 64 * 1024, ky: 48 * 1024, entrants: 48 * 1024 };
 
 export const MAX_ROWS = 200;
 export const MAX_BODY = 2 * 1024 * 1024;

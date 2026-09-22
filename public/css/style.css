@@ -791,6 +791,23 @@ table.data.two-up .i-res { width: 18%; }
 }
 
 @media print {
+  .ky-doc { font-size: 8.4pt; }
+  .ky-doc th, .ky-doc td { padding: 2px 4px; }
+  .ky-title-row .ky-title { font-size: 15pt; }
+  .ky-doc th, .ky-mem .ky-mem-th, .ky-mem .ky-count, .ky-top th, .ky-goal th, .ky-risk thead th {
+    background: #eee !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .en-doc { font-size: 8.2pt; }
+  .en-doc th, .en-doc td { padding: 2px 4px; }
+  .en-title { font-size: 14pt; }
+  .en-table th, .en-table .en-side {
+    background: #eee !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .en-table .en-q { background: #fff !important; }
   .sheet-doc .doc-title { font-size: 14pt; }
   .sheet-doc .doc-head { padding-bottom: 3px; margin-bottom: 5px; }
   .sheet-doc .doc-sub { font-size: 8.5pt; }
@@ -1229,6 +1246,87 @@ tr.unsent td { background: var(--amber-bg); }
 .c4 { background: #b5533c; } .c5 { background: #1d2d3d; } .c6 { background: #4f8a2b; } .c7 { background: #8a6d3b; }
 .legend-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .s-legend { font-size: 11px; color: #fff; padding: 2px 6px; }
+
+/* ---------- KY活動表（画面） ---------- */
+.ky-row { padding: 12px 0; border-bottom: 1px solid var(--hairline); }
+.ky-row:last-child { border-bottom: none; }
+.ky-row-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-weight: 700;
+  font-size: 13.5px;
+  margin-bottom: 8px;
+}
+.ky-grade { font-weight: 400; font-size: 12px; color: var(--muted); }
+.ky-grade.ok { color: var(--accent-700); font-weight: 700; }
+.ky-grade.warn { color: #8a6a00; font-weight: 700; }
+.ky-grade.ng { color: var(--red); font-weight: 700; }
+
+/* ---------- KY活動表（印刷・A4横） ---------- */
+.ky-doc { background: #fff; color: #000; font-size: 11px; }
+.ky-doc table { width: 100%; border-collapse: collapse; margin-bottom: 4px; }
+.ky-doc th, .ky-doc td { border: 1px solid #000; padding: 3px 5px; vertical-align: middle; }
+.ky-title-row { margin-bottom: 8px; }
+.ky-title-row .ky-title {
+  border: none;
+  font-size: 19px;
+  font-weight: 700;
+  text-align: center;
+  letter-spacing: .2em;
+}
+.ky-title-row .ky-th { width: 70px; text-align: center; background: #eee; }
+.ky-title-row .ky-name { width: 130px; }
+.ky-top th { width: 92px; background: #eee; white-space: nowrap; text-align: left; }
+.ky-top td { height: 22px; }
+.ky-risk thead th { background: #eee; text-align: center; }
+.ky-risk .ky-haz { width: 24%; vertical-align: top; }
+.ky-risk .ky-mea { width: 26%; vertical-align: top; }
+.ky-risk .ky-lv { width: 11%; white-space: nowrap; }
+.ky-risk .ky-plus { width: 3%; text-align: center; }
+.ky-risk .ky-ev { width: 16%; white-space: nowrap; }
+.ky-pick { border: 1.5px solid #000; border-radius: 999px; padding: 0 5px; font-weight: 700; }
+.ky-goal th { width: 120px; background: #eee; white-space: nowrap; }
+.ky-goal td { height: 26px; }
+.ky-mem .ky-mem-th { width: 80px; background: #eee; text-align: center; }
+.ky-mem td { height: 22px; text-align: center; }
+.ky-mem .ky-count { width: 84px; background: #eee; text-align: center; white-space: nowrap; }
+
+/* ---------- 新規入場者調査票（画面） ---------- */
+.lic-group { padding: 12px 0; border-bottom: 1px solid var(--hairline); }
+.lic-group:last-child { border-bottom: none; }
+.lic-name { font-weight: 700; font-size: 13.5px; margin-bottom: 4px; }
+.lic-note { font-weight: 400; font-size: 11.5px; color: var(--muted); margin-left: 8px; }
+.lic-items {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 0 16px;
+  margin-bottom: 8px;
+}
+.lic-items .check-line { min-height: 44px; font-size: 13.5px; }
+.em-row { padding: 10px 0; border-bottom: 1px solid var(--hairline); }
+.em-row:last-child { border-bottom: none; }
+ul.pledge { margin: 0 0 14px; padding-left: 1.2em; font-size: 13.5px; line-height: 1.8; }
+
+/* ---------- 新規入場者調査票（印刷・A4縦） ---------- */
+.en-doc { font-size: 11px; }
+.en-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.en-form { font-size: 11px; }
+.en-title { font-size: 18px; font-weight: 700; letter-spacing: .14em; }
+.en-day { font-size: 12px; white-space: nowrap; }
+.en-note { font-size: 10px; line-height: 1.5; margin: 4px 0 6px; }
+.en-table { margin-bottom: 6px; }
+.en-table th { background: #eee; white-space: nowrap; }
+.en-table .en-side { width: 22px; background: #eee; }
+.en-table .en-q { width: 52%; font-weight: 400; text-align: left; background: #fff; white-space: normal; }
+.en-box { display: inline-block; margin-right: 12px; white-space: nowrap; }
+.en-sec { font-weight: 700; margin: 8px 0 4px; }
+.en-lic th { width: 21%; white-space: normal; }
+.en-lic td { line-height: 1.8; }
+.en-lic .en-none { color: #444; }
+.en-sub { font-weight: 400; font-size: 10px; margin-left: 8px; }
+ul.en-pledge { margin: 0 0 8px; padding-left: 1.2em; font-size: 10.5px; line-height: 1.6; }
 
 /* ---------- 出来高曲線 ---------- */
 .curve { width: 100%; height: auto; display: block; }

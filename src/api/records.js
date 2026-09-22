@@ -14,7 +14,7 @@ import {
   upsertRows, dbFailure
 } from '../lib/db.js';
 import {
-  ADMIN_KINDS, FIELD_SITE_KINDS, FIELD_DEPOT_KINDS, FIELD_INSPECTION_DAYS, FIELD_WRITE, MAX_BODY,
+  ADMIN_KINDS, FIELD_SITE_KINDS, FIELD_DEPOT_KINDS, FIELD_RECENT_KINDS, FIELD_INSPECTION_DAYS, FIELD_WRITE, MAX_BODY,
   normalizeRows, siteForField, mergeApprovals, daysAgo
 } from '../lib/policy.js';
 import { verifyTurnstile } from '../lib/turnstile.js';
@@ -218,7 +218,7 @@ export async function fieldPull({ request, env }) {
     const groups = [
       ['s', [['kind', 'eq.sites'], ['id', 'in.' + inList(ids)]]],
       ['k', [['kind', 'in.(' + FIELD_SITE_KINDS.join(',') + ')'], ['data->>siteId', 'in.' + inList(ids)]]],
-      ['i', [['kind', 'eq.inspections'], ['data->>siteId', 'in.' + inList(ids)],
+      ['i', [['kind', 'in.(' + FIELD_RECENT_KINDS.join(',') + ')'], ['data->>siteId', 'in.' + inList(ids)],
         ['data->>date', 'gte.' + daysAgo(FIELD_INSPECTION_DAYS)]]]
     ];
     if (scope.depotIds.length) {
