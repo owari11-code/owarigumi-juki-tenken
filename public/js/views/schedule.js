@@ -200,7 +200,8 @@
         return '<button class="ge-z' + (k === z ? ' on' : '') + '" data-zoom="' + k + '">' +
           (k === 'day' ? '日' : k === 'week' ? '週' : '月') + '</button>';
       }).join('') + '</span>' +
-      '<span class="legend">帯＝予定期間　濃い部分＝進捗　<span class="lg-rev">緑</span>＝変更後の工程（「変」で作る）　赤い帯＝10ポイント以上の遅れ　縦線＝今日</span>' +
+      '<span class="legend"><span class="lg-plan">黒の枠</span>＝予定　<span class="lg-actual">赤</span>＝実績（進捗）　' +
+      '<span class="lg-rev">緑</span>＝変更（「変」で作る）　うすい赤の地＝10ポイント以上の遅れ　破線＝今日</span>' +
       '</div>';
   }
 
@@ -444,7 +445,8 @@
     return '<div class="gantt print">' +
       '<div class="g-row g-head"><div class="g-name">工種</div><div class="g-track">' + ticks + '</div></div>' +
       rows + '</div>' +
-      '<p class="legend">帯＝予定期間　濃い部分＝進捗（実績）　緑＝変更後の工程　赤い帯＝10ポイント以上の遅れ　縦線＝今日</p>';
+      '<p class="legend"><span class="lg-plan">黒の枠</span>＝予定　<span class="lg-actual">赤</span>＝実績（進捗）　' +
+      '<span class="lg-rev">緑</span>＝変更　うすい赤の地＝10ポイント以上の遅れ　破線＝今日</p>';
   }
 
   /* ------------------------------------------------------------------ *
