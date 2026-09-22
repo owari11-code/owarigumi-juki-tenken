@@ -81,6 +81,27 @@
     return tsLoading;
   }
 
+  /** 安全確認が出せなかったときの案内（原因ごとに変える） */
+  function turnstileHelp(code) {
+    var here = location.hostname;
+    var want = '';
+    try {
+      var base = (global.APP_CONFIG || {}).baseUrl;
+      if (base) want = new URL(base, location.href).hostname;
+    } catch (e) { /* 無視 */ }
+
+    if (String(code) === '110200') {
+      return '安全確認は、このアドレスでは許可されていません（コード 110200）。' +
+        'いま開いているのは ' + here + ' です。' +
+        (want && want !== here
+          ? '正しいアドレス https://' + want + '/ で開き直してください。'
+          : 'Cloudflare の Turnstile の設定で、このアドレスを許可してください。');
+    }
+    return '安全確認の画面を表示できませんでした' + (code ? '（コード ' + code + '）' : '') +
+      '。いま開いているアドレスは ' + here + ' です。' +
+      '通信環境をご確認ください。社内の設定で challenges.cloudflare.com への通信が遮断されていると、この表示になります。';
+  }
+
   function turnstileToken(isRetry) {
     var siteKey = config().siteKey;
     if (!siteKey) return Promise.resolve('');
@@ -121,9 +142,7 @@
                 setTimeout(function () { turnstileToken(true).then(resolve, reject); }, 800);
                 return;
               }
-              finish(reject, new ApiError(0, 'turnstile_blocked',
-                '安全確認の画面を表示できませんでした' + (code ? '（コード ' + code + '）' : '') +
-                '。通信環境をご確認ください。社内の設定で challenges.cloudflare.com への通信が遮断されていると、この表示になります。'));
+              finish(reject, new ApiError(0, 'turnstile_blocked', turnstileHelp(code)));
             },
             'expired-callback': function () {
               finish(reject, new ApiError(0, 'turnstile_expired', '安全確認の有効時間が切れました。もう一度お試しください。'));
