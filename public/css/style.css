@@ -1620,3 +1620,6 @@ table.data tr.off td { color: var(--faint); }
 table.data tfoot th { background: var(--surface); text-align: right; }
 table.data tfoot th:first-child { text-align: left; }
 #f-xlsx { display: block; width: 100%; min-height: 52px; padding: 10px 12px; border: 1px dashed rgba(33,42,44,.35); border-radius: var(--r-sm); background: var(--paper); font-family: inherit; font-size: 15px; }
+table.data tr.add td { background: var(--accent-100); }
+table.data tr.add td.c { font-weight: 700; color: var(--accent-700); }
+input[readonly] { background: var(--surface); color: var(--muted); }

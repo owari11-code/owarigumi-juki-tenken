@@ -574,8 +574,8 @@
     var R_HEAD = 4;                      // 表の見出し（年度／月／日）の最初の行
     var R_BODY = R_HEAD + 3;             // 種別の最初の行
 
-    /* 構成比率。積算金額が入っていれば金額から、無ければ重みから出す（合計100%） */
-    var ratios = M.taskRatios(tasks);
+    /* 構成比率。純工事費（全体金額）が入っていればそれを分母に、無ければ入力の合計を分母にする */
+    var ratios = M.taskRatios(tasks, site);
     function ratioOf(t) { return ratios.byId[t.id] || 0; }
 
     /* ---- 書式 ---- */
@@ -1030,8 +1030,11 @@
           '<div class="kpi' + (label.cls === 'ng' ? ' alarm' : '') + '"><span class="kpi-fig small">' + esc(label.text) + '</span><span class="kpi-label">予定との差 ' + (p.diff > 0 ? '+' : '') + p.diff + 'pt</span></div>' +
           '</div>';
       } else {
-        html += UI.alert('info', '<strong>工種を追加してください。</strong>下の表の「工種名」を入れて＋を押すか、' +
-          '一番下の行を横にドラッグすると、その期間で工種を追加できます。');
+        html += UI.alert('info', '<strong>工程を作りましょう。</strong>' +
+          '請負代金内訳書（様式第22）のExcelがあれば、そのまま読み込めます。' +
+          '手で作るときは、下の表に工種（大分類）と種別（中分類）を入れて＋を押すか、' +
+          '一番下の行を横にドラッグしてください。') +
+          UI.btnRow('<a class="btn lead block" href="#/breakdown?site=' + sid + '">請負代金内訳書を読み込む</a>');
       }
 
       html += UI.h2('GANTT', '工程表（ドラッグで編集）') + '<div class="card">' + editorHtml(site, tasks) + '</div>';
@@ -1039,24 +1042,47 @@
       if (tasks.length) {
         html += UI.h2('CURVE', '出来形（全体進捗率）') + '<div class="card">' + curveSvg(site, tasks) + '</div>';
 
-        var ratios = M.taskRatios(tasks);
+        var ratios = M.taskRatios(tasks, site);
         var contract = U.num(site.contractAmount);
+        var split = M.commonSplit(site);
 
         html += UI.h2('AMOUNT', '金額と構成比率') + '<div class="card">' +
           '<table class="kv"><tbody>' +
-          '<tr><th>請負金額</th><td>' + (contract ? U.fmtNum(contract, 0) + ' 円' :
-            '<span class="muted">未入力（<a href="#/site/' + sid + '/edit">現場の編集</a>で入れられます）</span>') + '</td></tr>' +
-          '<tr><th>内訳の合計</th><td>' + (ratios.amountSum ? U.fmtNum(ratios.amountSum, 0) + ' 円' +
-            (contract ? '　<span class="muted">請負金額の ' + U.fmtNum(ratios.amountSum / contract * 100, 1) + '%</span>' : '')
+          '<tr><th>請負金額</th><td>' + (contract ? U.fmtNum(contract, 0) + ' 円' : '<span class="muted">未入力</span>') + '</td></tr>' +
+          '<tr><th>純工事費<br><span class="muted">（全体金額）</span></th><td>' +
+          (ratios.net ? U.fmtNum(ratios.net, 0) + ' 円' +
+            (contract ? '　<span class="muted">請負金額の ' + U.fmtNum(ratios.net / contract * 100, 1) + '%</span>' : '')
+            : '<span class="muted">未入力（入れると、ここを分母に構成比率を出します）</span>') + '</td></tr>' +
+          '<tr><th>工程の金額合計</th><td>' + (ratios.amountSum ? U.fmtNum(ratios.amountSum, 0) + ' 円' +
+            (ratios.usesNet ? '　<span class="' + (Math.abs(ratios.coverage - 100) < 0.5 ? 'muted' : 'warn-text') + '">純工事費の ' +
+              U.fmtNum(ratios.coverage, 1) + '%</span>' : '')
             : '<span class="muted">未入力</span>') + '</td></tr>' +
           (ratios.fromAmount && ratios.missing
             ? '<tr><th>金額が未入力</th><td class="warn-text">' + ratios.missing + ' 件（構成比率がほぼ0になります）</td></tr>'
             : '') +
           '</tbody></table>' +
-          UI.btnRow('<a class="btn small secondary" href="#/breakdown?site=' + sid + '">請負代金内訳書を読み込む</a>') +
-          '<p class="section-note">' + (ratios.fromAmount
-            ? '構成比率は、入力した積算金額から出しています。'
-            : '積算金額を入れると、構成比率が金額から出ます（いまは「重み」で計算しています）。') + '</p></div>';
+          '<p class="section-note">' + (ratios.usesNet
+            ? '構成比率は「積算金額 ÷ 純工事費」で出しています。'
+            : ratios.fromAmount
+              ? '構成比率は、入力した積算金額の合計を分母に出しています（純工事費を入れると、そちらが分母になります）。'
+              : '積算金額を入れると、構成比率が金額から出ます（いまは「重み」で計算しています）。') + '</p>' +
+          UI.btnRow('<a class="btn small secondary" href="#/breakdown?site=' + sid + '">請負代金内訳書を読み込む</a>' +
+            '<a class="btn small plain" href="#/site/' + sid + '/edit">金額を直す</a>') + '</div>';
+
+        if (split) {
+          html += UI.h2('COMMON', '準備工・後片付（共通仮設費から）') + '<div class="card">' +
+            '<p class="section-note">共通仮設費 <strong>' + U.fmtNum(split.common, 0) + ' 円</strong> を、' +
+            '準備工と後片付に割り振ります。割合はいつでも変えられます。</p>' +
+            '<div class="field-row">' +
+            UI.field('準備工の割合（%）', UI.number('f-share', split.share, ' step="1" min="0" max="100"')) +
+            UI.field('後片付の割合（%）', UI.text('f-share2', (100 - split.share) + ' %', '', ' readonly')) +
+            '</div>' +
+            '<table class="kv"><tbody>' +
+            '<tr><th>準備工</th><td>' + U.fmtNum(split.prep, 0) + ' 円</td></tr>' +
+            '<tr><th>後片付</th><td>' + U.fmtNum(split.cleanup, 0) + ' 円</td></tr>' +
+            '</tbody></table>' +
+            UI.btnRow('<button class="btn" id="b-share">この割合にする</button>') + '</div>';
+        }
 
         html += UI.h2('PROGRESS', '数字で入力');
         html += '<div class="card"><p class="section-note">細かく合わせたいときは、ここに数字で入れてください。</p>' +
@@ -1079,12 +1105,38 @@
 
       html += UI.btnRow(
         (tasks.length ? '<button class="btn secondary" id="b-excel">実施工程表をExcelに出力</button>' : '') +
-        '<a class="btn plain" href="#/task/new?site=' + sid + '">工種を詳しく登録</a>' +
+        '<a class="btn plain" href="#/breakdown?site=' + sid + '">請負代金内訳書を読み込む</a>' +
+        '<a class="btn plain" href="#/task/new?site=' + sid + '">工種・種別を詳しく登録</a>' +
         (tasks.length ? '<a class="btn plain" href="#/print/schedule?site=' + sid + '">工程表を印刷</a>' : ''));
       return html;
     },
     bind: function (site) {
       bindEditor(site);
+
+      /* 準備工・後片付の割合を変える（共通仮設費の振り分け） */
+      U.on('#f-share', 'input', function () {
+        var v = U.num(U.val('#f-share'));
+        var box = U.qs('#f-share2');
+        if (box) box.value = (v === null || v < 0 || v > 100 ? '－' : (100 - v)) + ' %';
+      });
+
+      U.on('#b-share', 'click', function () {
+        var v = U.num(U.val('#f-share'));
+        if (v === null || v < 0 || v > 100) return U.toast('0〜100の数字で入れてください');
+        var fresh = Store.get('sites', site.id);
+        fresh.prepShare = v;
+        Store.put('sites', fresh);
+        var sp = M.commonSplit(fresh);
+        var n = 0;
+        M.tasks(site.id).forEach(function (t) {
+          if (t.costKind !== 'prep' && t.costKind !== 'cleanup') return;
+          t.amount = t.costKind === 'prep' ? sp.prep : sp.cleanup;
+          Store.put('tasks', t);
+          n++;
+        });
+        U.toast(n ? '割合を変えました' : '割合を保存しました（準備工・後片付の行がまだありません）');
+        MT.rerender();
+      });
 
       U.on('#b-excel', 'click', function () {
         try {

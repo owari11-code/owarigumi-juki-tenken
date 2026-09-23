@@ -80,8 +80,13 @@
       UI.field('発注者', UI.text('f-client', site.client, '例：愛知県○○建設事務所')) +
       UI.field('工事場所', UI.text('f-location', site.location, '例：豊田市○○町地内')) +
       UI.field('工事延長・数量', UI.text('f-extent', site.extent, '例：L=34.4m'), false, '実施工程表（Excel）の「工事延長」欄に入ります') +
-      UI.field('請負金額（円）', UI.number('f-amount', site.contractAmount, ' step="1" min="0"'), false,
-        '税込の契約金額。工種ごとの積算金額を入れると、請負金額に対する割合が出ます') +
+      '<div class="field-row">' +
+      UI.field('請負金額（円）', UI.number('f-amount', site.contractAmount, ' step="1" min="0"'), false, '税込の契約金額') +
+      UI.field('純工事費（円）', UI.number('f-net', site.netCost, ' step="1" min="0"'), false,
+        '構成比率のもとにする全体金額（直接工事費＋共通仮設費）') +
+      '</div>' +
+      UI.field('共通仮設費（円）', UI.number('f-common', site.commonCost, ' step="1" min="0"'), false,
+        'ここから「準備工」「後片付」の金額を出します') +
       '<div class="field-row">' +
       UI.field('工期（開始）', UI.date('f-from', site.periodFrom)) +
       UI.field('工期（終了）', UI.date('f-to', site.periodTo)) +
@@ -110,6 +115,8 @@
       site.location = U.val('#f-location');
       site.extent = U.val('#f-extent');
       site.contractAmount = U.num(U.val('#f-amount'));
+      site.netCost = U.num(U.val('#f-net'));
+      site.commonCost = U.num(U.val('#f-common'));
       site.periodFrom = from;
       site.periodTo = to;
       site.manager = U.val('#f-manager');

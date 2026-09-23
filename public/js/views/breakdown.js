@@ -91,10 +91,40 @@
       leaves.push({ group: group, name: it.label, amount: it.amount, use: true });
     });
 
-    var pick = totals.filter(function (t) { return /合計/.test(clean(t.label)); })[0] ||
-      totals.filter(function (t) { return /工事価格/.test(clean(t.label)); })[0] || null;
+    function find(re) {
+      var hit = totals.filter(function (t) { return re.test(clean(t.label)); })[0];
+      return hit ? hit.amount : null;
+    }
+    return {
+      title: title,
+      items: leaves,
+      totals: totals,
+      contract: find(/^合計$/) || find(/合計/) || find(/工事価格/),   // 請負金額
+      net: find(/純工事費/),                                          // 全体金額（構成比率の分母）
+      common: find(/共通仮設費/),                                     // 準備工・後片付のもと
+      useCommon: find(/共通仮設費/) !== null,
+      share: 50
+    };
+  }
 
-    return { title: title, items: leaves, totals: totals, contract: pick ? pick.amount : null };
+  /** 選ばれた集計行（select の値）を金額に直す */
+  function totalValue(id) {
+    return id === '' ? null : picked.totals[Number(id)].amount;
+  }
+
+  function totalOptions() {
+    return [['', '（入れない）']].concat(picked.totals.map(function (t, i) {
+      return [String(i), t.label + '　' + U.fmtNum(t.amount, 0) + ' 円'];
+    }));
+  }
+
+  /** 金額から、選択肢の番号を探す */
+  function indexOfAmount(amount) {
+    if (amount === null) return '';
+    for (var i = 0; i < picked.totals.length; i++) {
+      if (picked.totals[i].amount === amount) return String(i);
+    }
+    return '';
   }
 
   /* ------------------------------------------------------------------ *
@@ -116,33 +146,65 @@
       var sum = 0;
       picked.items.forEach(function (it) { if (it.use) sum += it.amount; });
       var contract = U.num(picked.contract);
+      var net = U.num(picked.net);
+      var common = picked.useCommon ? U.num(picked.common) : null;
+      var prep = common === null ? 0 : Math.round(common * picked.share / 100);
+      var extra = common === null ? [] : [
+        { group: '共通仮設費', name: '準備工', amount: prep, costKind: 'prep' },
+        { group: '共通仮設費', name: '後片付', amount: common - prep, costKind: 'cleanup' }
+      ];
+      var withExtra = sum + (common === null ? 0 : common);
+      var base = net !== null ? net : withExtra;
 
-      html += UI.h2('TOTAL', '請負金額') + '<div class="card">' +
+      html += UI.h2('TOTAL', '金額の決めごと') + '<div class="card">' +
         (picked.title ? '<p class="muted">内訳書の工事名：' + esc(picked.title) + '</p>' : '') +
-        UI.field('請負金額として使う行', UI.select('f-total',
-          [['', '（入れない）']].concat(picked.totals.map(function (t, i) {
-            return [String(i), t.label + '　' + U.fmtNum(t.amount, 0) + ' 円'];
-          })),
-          picked.totals.reduce(function (acc, t, i) { return t.amount === picked.contract ? String(i) : acc; }, ''))) +
+        UI.field('全体金額（構成比率の分母）', UI.select('f-net', totalOptions(), indexOfAmount(picked.net)), false,
+          '純工事費（直接工事費＋共通仮設費）を選びます') +
+        UI.field('請負金額', UI.select('f-total', totalOptions(), indexOfAmount(picked.contract))) +
         '</div>';
 
-      html += UI.h2('ITEMS', '取り込む工種・種別（' + picked.items.length + '件）') +
+      html += UI.h2('COMMON', '準備工・後片付') + '<div class="card">' +
+        UI.checkbox('f-usecommon', '共通仮設費から「準備工」「後片付」の行をつくる', picked.useCommon) +
+        (picked.useCommon
+          ? UI.field('共通仮設費', UI.select('f-common', totalOptions(), indexOfAmount(picked.common))) +
+            '<div class="field-row">' +
+            UI.field('準備工の割合（%）', UI.number('f-share', picked.share, ' step="1" min="0" max="100"')) +
+            UI.field('後片付の割合（%）', UI.text('f-share2', (100 - picked.share) + ' %', '', ' readonly')) +
+            '</div>' +
+            '<p class="section-note">準備工 <strong>' + U.fmtNum(prep, 0) + ' 円</strong>　／　' +
+            '後片付 <strong>' + U.fmtNum(common - prep, 0) + ' 円</strong>' +
+            '（割合は取り込んだ後でも、工程の画面から変えられます）</p>'
+          : '<p class="section-note">内訳書に共通仮設費の行が見つからないか、使わない設定です。</p>') +
+        '</div>';
+
+      html += UI.h2('ITEMS', '取り込む工種・種別（' + (picked.items.length + extra.length) + '件）') +
         '<div class="card">' +
         '<div class="table-scroll"><table class="data"><thead><tr>' +
         '<th class="nowrap">取込</th><th>工種（大分類）</th><th>種別（中分類）</th>' +
         '<th class="r">積算金額</th><th class="r">構成比率</th><th class="r">請負比</th></tr></thead><tbody>' +
         picked.items.map(function (it, i) {
-          var ratio = sum > 0 ? it.amount / sum * 100 : 0;
           return '<tr class="' + (it.use ? '' : 'off') + '"><td class="c">' +
             '<input type="checkbox" class="bd-use" data-i="' + i + '"' + (it.use ? ' checked' : '') + '></td>' +
             '<td>' + esc(it.group || '－') + '</td><td>' + esc(it.name) + '</td>' +
             '<td class="r">' + U.fmtNum(it.amount, 0) + '</td>' +
-            '<td class="r">' + U.fmtNum(ratio, 1) + '%</td>' +
+            '<td class="r">' + (base > 0 ? U.fmtNum(it.amount / base * 100, 1) + '%' : '－') + '</td>' +
             '<td class="r">' + (contract ? U.fmtNum(it.amount / contract * 100, 1) + '%' : '－') + '</td></tr>';
         }).join('') +
-        '</tbody><tfoot><tr><th colspan="3">内訳の合計</th><th class="r">' + U.fmtNum(sum, 0) + '</th>' +
-        '<th class="r">100.0%</th><th class="r">' + (contract ? U.fmtNum(sum / contract * 100, 1) + '%' : '－') + '</th></tr></tfoot>' +
-        '</table></div></div>';
+        extra.map(function (it) {
+          return '<tr class="add"><td class="c">＋</td><td>' + esc(it.group) + '</td><td>' + esc(it.name) + '</td>' +
+            '<td class="r">' + U.fmtNum(it.amount, 0) + '</td>' +
+            '<td class="r">' + (base > 0 ? U.fmtNum(it.amount / base * 100, 1) + '%' : '－') + '</td>' +
+            '<td class="r">' + (contract ? U.fmtNum(it.amount / contract * 100, 1) + '%' : '－') + '</td></tr>';
+        }).join('') +
+        '</tbody><tfoot><tr><th colspan="3">合計</th><th class="r">' + U.fmtNum(withExtra, 0) + '</th>' +
+        '<th class="r">' + (base > 0 ? U.fmtNum(withExtra / base * 100, 1) + '%' : '－') + '</th>' +
+        '<th class="r">' + (contract ? U.fmtNum(withExtra / contract * 100, 1) + '%' : '－') + '</th></tr></tfoot>' +
+        '</table></div>' +
+        (base > 0 && Math.abs(withExtra / base * 100 - 100) >= 0.5
+          ? '<p class="section-note warn-text">合計が全体金額と合っていません（' + U.fmtNum(withExtra / base * 100, 1) +
+            '%）。全体金額の選び方か、取り込む行をご確認ください。</p>'
+          : '<p class="section-note">合計が全体金額とそろっています。構成比率の合計が100%になります。</p>') +
+        '</div>';
 
       if (has) {
         html += UI.alert('warn', 'この現場には、すでに <strong>' + has + '件</strong> の工程が入っています。' +
@@ -193,18 +255,34 @@
       });
     });
 
+    U.on('#f-net', 'change', function () { picked.net = totalValue(U.val('#f-net')); render(site); });
+    U.on('#f-total', 'change', function () { picked.contract = totalValue(U.val('#f-total')); render(site); });
+    U.on('#f-common', 'change', function () { picked.common = totalValue(U.val('#f-common')); render(site); });
+    U.on('#f-usecommon', 'change', function () { picked.useCommon = U.checked('#f-usecommon'); render(site); });
+    U.on('#f-share', 'change', function () {
+      var v = U.num(U.val('#f-share'));
+      picked.share = v === null || v < 0 || v > 100 ? 50 : v;
+      render(site);
+    });
+
     U.on('#b-import', 'click', function () {
       var use = picked.items.filter(function (it) { return it.use; });
       if (!use.length) return U.toast('取り込む行を選んでください');
       var mode = U.val('#f-mode') || 'add';
-      if (mode === 'replace' && !confirm('いまの工程をすべて消して、' + use.length + '件を入れ直します。よろしいですか？')) return;
 
-      var ti = U.val('#f-total');
-      if (ti !== '') {
-        var fresh = Store.get('sites', site.id);
-        fresh.contractAmount = picked.totals[Number(ti)].amount;
-        Store.put('sites', fresh);
-      }
+      var common = picked.useCommon ? U.num(picked.common) : null;
+      var share = U.num(picked.share);
+      if (share === null || share < 0 || share > 100) share = 50;
+      var prep = common === null ? 0 : Math.round(common * share / 100);
+      var total = use.length + (common === null ? 0 : 2);
+      if (mode === 'replace' && !confirm('いまの工程をすべて消して、' + total + '件を入れ直します。よろしいですか？')) return;
+
+      var fresh = Store.get('sites', site.id);
+      fresh.contractAmount = totalValue(U.val('#f-total'));
+      fresh.netCost = totalValue(U.val('#f-net'));
+      fresh.commonCost = common;
+      fresh.prepShare = share;
+      Store.put('sites', fresh);
 
       if (mode === 'replace') M.tasks(site.id).forEach(function (t) { Store.remove('tasks', t.id); });
 
@@ -212,21 +290,39 @@
       var from = U.isDate(site.periodFrom) ? site.periodFrom : U.todayStr();
       var to = U.isDate(site.periodTo) && site.periodTo > from ? site.periodTo : U.addDays(from, use.length * 7);
       var span = U.diffDays(from, to) + 1;
-      var per = Math.max(3, Math.round(span / use.length));
-      var step = use.length > 1 ? (span - per) / (use.length - 1) : 0;
+
+      // 準備工は工期の頭、後片付は工期の終わりに置き、その間に工種を並べる
+      var head = Math.max(2, Math.min(6, Math.round(span / 12)));
+      var bodyFrom = common !== null ? U.addDays(from, head + 1) : from;
+      var bodyTo = common !== null ? U.addDays(to, -(head + 1)) : to;
+      if (bodyTo <= bodyFrom) { bodyFrom = from; bodyTo = to; }
+      var bodySpan = U.diffDays(bodyFrom, bodyTo) + 1;
+      var per = Math.max(3, Math.round(bodySpan / use.length));
+      var step = use.length > 1 ? (bodySpan - per) / (use.length - 1) : 0;
 
       use.forEach(function (it, i) {
-        var s = U.addDays(from, Math.round(i * step));
+        var s = U.addDays(bodyFrom, Math.round(i * step));
         var e = U.addDays(s, per - 1);
-        if (e > to) e = to;
+        if (e > bodyTo) e = bodyTo;
         Store.put('tasks', {
           siteId: site.id, group: it.group, name: it.name, amount: it.amount,
           planStart: s, planEnd: e, progress: 0, weight: null, note: ''
         });
       });
 
+      if (common !== null) {
+        Store.put('tasks', {
+          siteId: site.id, group: '共通仮設費', name: '準備工', amount: prep, costKind: 'prep',
+          planStart: from, planEnd: U.addDays(from, head), progress: 0, weight: null, note: ''
+        });
+        Store.put('tasks', {
+          siteId: site.id, group: '共通仮設費', name: '後片付', amount: common - prep, costKind: 'cleanup',
+          planStart: U.addDays(to, -head), planEnd: to, progress: 0, weight: null, note: ''
+        });
+      }
+
       picked = null;
-      U.toast(use.length + '件を取り込みました');
+      U.toast(total + '件を取り込みました');
       U.go('#/site/' + encodeURIComponent(site.id) + '?tab=schedule');
     });
   }

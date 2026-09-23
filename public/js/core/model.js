@@ -326,24 +326,45 @@
   }
   M.taskWeight = weight;
 
-  /** 工種ごとの構成比率（合計100%）と、金額の内訳 */
-  M.taskRatios = function (tasks) {
+  /**
+   * 工種ごとの構成比率と、金額の内訳。
+   * 分母（全体金額）は、現場に「純工事費」が入っていればそれを使う。
+   * 入っていなければ、入力された金額（または重み）の合計を分母にする（＝合計100%）。
+   */
+  M.taskRatios = function (tasks, site) {
     var total = 0, amountSum = 0, withAmount = 0;
     tasks.forEach(function (t) {
       total += weight(t);
       var a = U.num(t.amount);
       if (a !== null && a > 0) { amountSum += a; withAmount++; }
     });
+    var net = site ? U.num(site.netCost) : null;
+    var base = net !== null && net > 0 && withAmount > 0 ? net : total;
     var byId = {};
-    tasks.forEach(function (t) { byId[t.id] = total > 0 ? weight(t) / total * 100 : 0; });
+    tasks.forEach(function (t) { byId[t.id] = base > 0 ? weight(t) / base * 100 : 0; });
     return {
       byId: byId,
       total: total,
+      base: base,
+      net: net,
+      usesNet: base === net && net > 0 && withAmount > 0,
       amountSum: amountSum,
       withAmount: withAmount,
       missing: tasks.length - withAmount,
-      fromAmount: withAmount > 0
+      fromAmount: withAmount > 0,
+      /** 全体金額のうち、工程に入っている割合（100%なら過不足なし） */
+      coverage: base > 0 ? amountSum / base * 100 : 0
     };
+  };
+
+  /** 共通仮設費から作る「準備工」「後片付」の金額 */
+  M.commonSplit = function (site) {
+    var common = site ? U.num(site.commonCost) : null;
+    if (common === null || common <= 0) return null;
+    var share = U.num(site.prepShare);
+    if (share === null || share < 0 || share > 100) share = 50;
+    var prep = Math.round(common * share / 100);
+    return { common: common, share: share, prep: prep, cleanup: common - prep };
   };
 
   /** 変更後の期間が入っているか */
