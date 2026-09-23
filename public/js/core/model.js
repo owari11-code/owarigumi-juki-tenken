@@ -349,6 +349,28 @@
     return n;
   };
 
+  /**
+   * 行をひとつ上（dir = -1）／下（dir = 1）へ入れ替える。
+   * 入れ替える前に、いまの並びで番号を振り直す（別の端末で足した行と番号が重なっていても崩れないように）。
+   */
+  M.moveTask = function (siteId, taskId, dir) {
+    var list = M.tasks(siteId);
+    var i = -1;
+    for (var k = 0; k < list.length; k++) if (list[k].id === taskId) i = k;
+    var j = i + dir;
+    if (i < 0 || j < 0 || j >= list.length) return false;
+    list.forEach(function (t, n) {
+      if (U.num(t.order) !== n + 1) { t.order = n + 1; Store.put('tasks', t); }
+    });
+    var a = list[i], b = list[j];
+    var tmp = a.order;
+    a.order = b.order;
+    b.order = tmp;
+    Store.put('tasks', a);
+    Store.put('tasks', b);
+    return true;
+  };
+
   /** 並び順を、いまの予定日の順に付け直す */
   M.reorderTasksByDate = function (siteId) {
     var list = Store.list('tasks', null, siteId).sort(function (a, b) {

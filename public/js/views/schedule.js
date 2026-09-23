@@ -174,7 +174,7 @@
     var side = '<div class="ge-side-head">工種・種別</div>';
     var tracks = '';
     var prevGroup = null;
-    tasks.forEach(function (t) {
+    tasks.forEach(function (t, k) {
       var prog = U.clamp(U.num(t.progress) || 0, 0, 100);
       var g = String(t.group || '').trim();
       side += '<div class="ge-name" data-task="' + esc(t.id) + '">' +
@@ -182,6 +182,11 @@
         '<span class="ge-g' + (g && g === prevGroup ? ' cont' : '') + '">' + esc(g || '（工種なし）') + '</span>' +
         '<a href="#/task/' + encodeURIComponent(t.id) + '/edit" title="' + esc((g ? g + '／' : '') + t.name) + '">' +
         esc(t.name) + '</a></span>' +
+        '<span class="ge-ord">' +
+        '<button class="ge-mv" data-move="up" data-task="' + esc(t.id) + '" title="ひとつ上へ"' +
+        (k === 0 ? ' disabled' : '') + '>▲</button>' +
+        '<button class="ge-mv" data-move="down" data-task="' + esc(t.id) + '" title="ひとつ下へ"' +
+        (k === tasks.length - 1 ? ' disabled' : '') + '>▼</button></span>' +
         '<button class="ge-rev' + (M.hasRev(t) ? ' on' : '') + '" data-rev="' + esc(t.id) +
         '" title="変更後の工程（緑の帯）">変</button>' +
         '<b class="' + (prog >= 100 ? 'ok' : '') + '">' + U.fmtNum(prog, 0) + '%</b></div>';
@@ -428,6 +433,21 @@
     U.on('#ge-big', 'click', function () {
       big = !big;
       MT.rerender();
+    });
+
+    /* 行をひとつ上／下へ動かす */
+    U.qsa('.ge-mv', box).forEach(function (b) {
+      b.addEventListener('click', function (e) {
+        e.preventDefault();
+        if (b.disabled) return;
+        var id = b.getAttribute('data-task');
+        var dir = b.getAttribute('data-move') === 'up' ? -1 : 1;
+        if (!M.moveTask(site.id, id, dir)) return;
+        MT.rerender();
+        // 続けて押せるよう、動かした行のボタンに焦点を戻す
+        var next = U.qs('.ge-mv[data-move="' + (dir < 0 ? 'up' : 'down') + '"][data-task="' + id + '"]');
+        if (next && !next.disabled) next.focus();
+      });
     });
 
     /* 行の並びを、いまの予定日の順にそろえ直す */

@@ -1069,7 +1069,9 @@ tr.unsent td { background: var(--amber-bg); }
   user-select: none;
   -webkit-user-select: none;
 }
-.ge-side { flex: 0 0 200px; border-right: 1px solid var(--divider); }
+/* min-width:0 が無いと、下の入力欄の分だけ勝手に広がってしまう */
+.ge-side { flex: 0 0 226px; min-width: 0; border-right: 1px solid var(--divider); }
+@media (max-width: 480px) { .ge-side { flex-basis: 176px; } }
 .ge-side-head {
   height: var(--head-h, 24px);
   display: flex;
@@ -1100,6 +1102,21 @@ tr.unsent td { background: var(--amber-bg); }
 .ge-g.cont { color: var(--faint); }   /* 上の行と同じ工種 */
 .ge-name a { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ge-name b { flex: none; font-family: var(--font-num); font-weight: 700; color: var(--muted); }
+.ge-ord { flex: none; display: flex; flex-direction: column; gap: 2px; }
+.ge-mv {
+  width: 22px;
+  height: 20px;
+  padding: 0;
+  font-size: 9px;
+  line-height: 1;
+  border: 1px solid var(--divider);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--muted);
+  cursor: pointer;
+}
+.ge-mv:disabled { color: rgba(33, 42, 44, .2); cursor: default; }
+.ge-mv:not(:disabled):hover { border-color: var(--accent); color: var(--accent); }
 .ge-rev {
   flex: none;
   width: 21px;
