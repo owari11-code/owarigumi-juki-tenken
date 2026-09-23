@@ -54,7 +54,8 @@ export const FIELD_WRITE = {
 const NO_SITE_KINDS = ['sites', 'staff'];
 
 const DEFAULT_ROW_LIMIT = 32 * 1024;
-const ROW_LIMIT = { inspections: 64 * 1024, ky: 48 * 1024, entrants: 48 * 1024 };
+/* KY活動表は参加者12名分の自筆サイン（線の通り道）を持つため、他より大きく取る */
+const ROW_LIMIT = { inspections: 64 * 1024, ky: 96 * 1024, entrants: 64 * 1024 };
 
 export const MAX_ROWS = 200;
 export const MAX_BODY = 2 * 1024 * 1024;

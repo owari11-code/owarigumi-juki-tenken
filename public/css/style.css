@@ -1276,7 +1276,7 @@ tr.unsent td { background: var(--amber-bg); }
   text-align: center;
   letter-spacing: .2em;
 }
-.ky-title-row .ky-th { width: 70px; text-align: center; background: #eee; }
+.ky-title-row .ky-th { width: 88px; text-align: center; background: #eee; }
 .ky-title-row .ky-name { width: 130px; }
 .ky-top th { width: 92px; background: #eee; white-space: nowrap; text-align: left; }
 .ky-top td { height: 22px; }
@@ -1290,7 +1290,7 @@ tr.unsent td { background: var(--amber-bg); }
 .ky-goal th { width: 120px; background: #eee; white-space: nowrap; }
 .ky-goal td { height: 26px; }
 .ky-mem .ky-mem-th { width: 80px; background: #eee; text-align: center; }
-.ky-mem td { height: 22px; text-align: center; }
+.ky-mem td { height: 40px; padding: 2px 4px; text-align: center; }
 .ky-mem .ky-count { width: 84px; background: #eee; text-align: center; white-space: nowrap; }
 
 /* ---------- 新規入場者調査票（画面） ---------- */
@@ -1387,3 +1387,150 @@ ul.en-pledge { margin: 0 0 8px; padding-left: 1.2em; font-size: 10.5px; line-hei
   .poster-site { font-size: 18pt; }
   .poster-steps { font-size: 15pt; }
 }
+
+/* ------------------------------------------------------------------ *
+ * 自筆サイン（KY活動表の参加者・新規入場者調査票の自署）
+ * ------------------------------------------------------------------ */
+/* ---------- 欄（画面） ---------- */
+.sign-box { display: flex; align-items: stretch; gap: 8px; }
+.sign-open {
+  flex: 1;
+  min-height: 78px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 10px;
+  border: 1px dashed rgba(33, 42, 44, .38);
+  border-radius: var(--r-sm);
+  background: var(--paper);
+  color: var(--text);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.sign-open:active { background: var(--accent-100); }
+.sign-open .sign-slot { display: block; width: 100%; height: 62px; }
+.sign-ph { display: block; line-height: 62px; font-size: 13.5px; color: var(--muted); text-align: center; }
+.sign-ink { display: block; width: 100%; height: 100%; }
+.sign-clear {
+  flex: none;
+  min-width: 62px;
+  border: 1px solid rgba(33, 42, 44, .28);
+  border-radius: var(--r-btn);
+  background: var(--paper);
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* ---------- 記入台（全画面） ---------- */
+.sign-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  padding: 10px;
+  padding-top: calc(10px + env(safe-area-inset-top));
+  padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  background: rgba(33, 42, 44, .55);
+}
+.sign-sheet {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: var(--r);
+  background: var(--paper);
+  box-shadow: var(--shadow);
+}
+.sign-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.sign-title { font-weight: 700; font-size: 15px; }
+.sign-x {
+  flex: none;
+  width: 48px;
+  height: 48px;
+  border: 1px solid var(--divider);
+  border-radius: var(--r-btn);
+  background: var(--paper);
+  color: var(--text);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+.sign-area {
+  position: relative;
+  flex: 1;
+  min-height: 150px;
+  border: 1px solid var(--divider);
+  border-radius: var(--r-sm);
+  background: #fff;
+  overflow: hidden;
+}
+.sign-area canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  touch-action: none;   /* 指で書いている間、画面が動かないようにする */
+}
+/* 書く位置の目安になる線 */
+.sign-base {
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  bottom: 30%;
+  border-bottom: 1px dashed rgba(33, 42, 44, .26);
+  pointer-events: none;
+}
+.sign-hint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 30%;
+  padding-bottom: 8px;
+  text-align: center;
+  font-size: 13.5px;
+  color: var(--faint);
+  pointer-events: none;
+}
+.sign-hint small { display: block; font-size: 11.5px; }
+.sign-actions { display: flex; gap: 8px; }
+.sign-actions .btn { flex: 1; min-height: 62px; padding: 6px 8px; white-space: nowrap; }
+.sign-actions .btn.lead { flex: 1.5; font-size: 16px; }
+
+/* ---------- 参加者の欄（KY活動表の入力・表示） ---------- */
+.mem-row { display: flex; align-items: flex-start; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--hairline); }
+.mem-row:last-child { border-bottom: none; }
+.mem-no {
+  flex: none;
+  width: 26px;
+  padding-top: 14px;
+  font-family: var(--font-num);
+  font-size: 18px;
+  color: var(--faint);
+  text-align: center;
+}
+.mem-body { flex: 1; min-width: 0; }
+.mem-body input[type="text"] { margin-bottom: 6px; }
+.mem-view { display: flex; flex-wrap: wrap; gap: 8px; }
+.mem-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 96px;
+  padding: 6px 8px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-sm);
+}
+.mem-sig { display: block; width: 88px; height: 30px; }
+.mem-nm { font-size: 13px; }
+.mem-nm.unsigned { color: var(--muted); }
+
+/* ---------- 帳票のサイン欄（印刷） ---------- */
+.sign-cell { display: block; width: 100%; height: 100%; min-height: 30px; }
+.ky-mem .sign-cell { height: 34px; }
+.en-sign td { height: 46px; }
+.en-sign .sign-cell { height: 40px; }
+.sign-view { height: 90px; }

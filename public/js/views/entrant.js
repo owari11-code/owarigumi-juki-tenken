@@ -15,6 +15,7 @@
   var Store = MT.store;
   var Session = MT.session;
   var Sync = MT.sync;
+  var Sign = MT.sign;
   var L = MT.licenses;
   var esc = U.esc;
 
@@ -43,18 +44,35 @@
     });
   }
 
-  /* 送り終えたものは、この端末から消す（現場に個人情報を残さないため） */
+  /*
+   * 送り終えたものは、この端末から消す（現場に個人情報を残さないため）。
+   * 「誰がこの端末を使っているか」が分かる前に動かしてはいけない。
+   * 分かる前は事務所も「現場」と見なされるため、事務所の控えまで消えてしまう。
+   */
   function purgeSent() {
-    if (Session.isAdmin()) return;
+    if (!Session.checked || Session.user) return;
     Store.list('entrants').forEach(function (e) {
       var raw = Store.raw('entrants', e.id);
       if (raw && !raw._dirty) Store.forget('entrants', e.id);
     });
   }
-  Store.ready.then(purgeSent);
+  Session.onChange(purgeSent);
   Sync.onStatus(function (st) { if (!st.running) purgeSent(); });
   // 送信が終わって「未送信」でなくなった時点で消す
   Store.onChange(function () { purgeSent(); });
+
+  /*
+   * 2026-09-23 の手当て。これより前の版では上の掃除が早く動きすぎて、
+   * 事務所の端末からも調査票の控えが消えていた。消えた分を取り戻すため、
+   * 事務所では一度だけ、サーバーから全件を受け取り直す。
+   */
+  var REFETCH = 'entrants-refetch-2026-09-23';
+  function refetchOnce() {
+    if (!Session.user || Store.getMeta(REFETCH)) return;
+    Store.setMeta(REFETCH, '1');
+    Store.setMeta('cursor.admin', '');
+  }
+  Session.onChange(refetchOnce);
 
   /* ------------------------------------------------------------------ *
    * 現場の画面（QR）に出す案内
@@ -127,6 +145,7 @@
     if (!site) return MT.notFound('現場が見つかりません。');
     if (!MT.requireSiteAccess(site.id)) return;
 
+    Sign.reset();
     var admin = Session.isAdmin();
     var back = admin
       ? (isNew ? '#/site/' + encodeURIComponent(site.id) + '?tab=entrant' : '#/entrant/' + encodeURIComponent(rec.id))
@@ -201,7 +220,10 @@
       '<li>個人情報の取扱いについて、了承しました。</li>' +
       '</ul>' +
       UI.checkbox('f-agree', '上の内容に同意します', !!rec.agree) +
-      UI.field('氏名（自署の代わりに入力）', UI.text('f-sign', rec.sign)) +
+      UI.field('ご本人のサイン（自署）',
+        Sign.boxHtml('sign', { label: '新規入場者調査票　ご本人のサイン', value: rec.signInk }),
+        false, 'サイン欄をタッチすると大きくなります。指・タッチペン・マウスで書いてください') +
+      UI.field('氏名（サインが書けないときは、ここに入力）', UI.text('f-sign', rec.sign)) +
       '</div>';
 
     html += UI.btnRow('<button class="btn lead block" id="b-save">提出する</button>') +
@@ -254,6 +276,8 @@
       rec.licenses = sel;
       rec.licenseOther = other;
       rec.agree = true;
+      var ink = Sign.get('sign');
+      if (ink) rec.signInk = ink; else delete rec.signInk;
       rec.sign = U.val('#f-sign') || name;
       Store.put('entrants', rec);
 
@@ -347,6 +371,11 @@
         '</tbody></table></div>';
     }
 
+    html += UI.h2('SIGN', '本人のサイン') + '<div class="card">' +
+      (Sign.isEmpty(e.signInk)
+        ? '<p class="muted">自筆のサインはありません。入力された氏名：' + esc(e.sign || e.name || '－') + '</p>'
+        : '<div class="sign-view">' + Sign.svg(e.signInk) + '</div>') + '</div>';
+
     html += UI.btnRow('<a class="btn secondary" href="#/entrant/' + id + '/edit">修正する</a>' +
       '<a class="btn plain" href="#/print/entrant?id=' + id + '">印刷（参考様式第4号）</a>');
     U.app().innerHTML = html;
@@ -435,8 +464,8 @@
       '<li>どんな小さなケガでも、必ず当日に報告します。危険箇所や有害箇所を発見したときは、直ちに安全衛生責任者もしくは、元請職員等に連絡します。</li>' +
       '<li>個人情報の取扱いについて、了承しました。</li>' +
       '</ul>' +
-      '<table class="doc-table en-table"><tbody><tr>' +
-      '<th>回答者サイン</th><td>' + esc(e.sign || e.name || '') + '</td>' +
+      '<table class="doc-table en-table en-sign"><tbody><tr>' +
+      '<th>回答者サイン（自筆）</th><td>' + Sign.inkOr(e.signInk, e.sign || e.name) + '</td>' +
       '<th>提出</th><td>' + esc(U.formatDate(e.date)) + '</td></tr></tbody></table>' +
       '</div></div>';
     UI.bindPrint();

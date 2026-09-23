@@ -14,6 +14,7 @@
   var UI = MT.ui;
   var Store = MT.store;
   var Session = MT.session;
+  var Sign = MT.sign;
   var esc = U.esc;
 
   var POSS = [['1', '１ ごくまれ'], ['2', '２ ときには'], ['3', '３ ありがち']];
@@ -21,6 +22,7 @@
   var BLANK = [['', '選んでください']];
   var WEATHER = ['晴', 'くもり', '雨', '雪', '強風', '猛暑'];
   var ROWS = 4;                       // 様式にある危険の行数
+  var MEMBERS = 12;                   // 様式にある参加者の欄の数
 
   /** 可能性＋重大性からリスクの大きさを出す */
   function grade(p, s) {
@@ -59,10 +61,20 @@
     return listOf(siteId).filter(function (k) { return k.date === t; });
   }
 
-  function members(k) {
-    return String((k && k.members) || '').split('\n').map(function (x) { return x.trim(); })
-      .filter(function (x) { return x; });
+  /**
+   * 参加者。[{ name, sign }] で持つ。
+   * 以前の記録は「1行に1人」の文字で入っているので、そちらからも読めるようにしている。
+   */
+  function people(k) {
+    var list = k && Array.isArray(k.people) ? k.people : null;
+    if (!list) {
+      list = String((k && k.members) || '').split('\n').map(function (x) { return { name: x.trim() }; });
+    }
+    return list.filter(function (p) { return p && (p.name || !Sign.isEmpty(p.sign)); });
   }
+
+  /** 現場代理人。以前は「担当者」の名前で recorder に入れていた */
+  function agentOf(k) { return (k && (k.agent || k.recorder)) || ''; }
 
   /* ------------------------------------------------------------------ *
    * 一覧（現場のタブ／現場の画面の両方から使う）
@@ -75,7 +87,7 @@
       var g = topGrade(k);
       var tags = [];
       if (g.text) tags.push({ cls: g.cls === 'ok' ? 'none' : g.cls, text: 'リスク' + g.text });
-      tags.push({ cls: 'none', text: members(k).length + '名' });
+      tags.push({ cls: 'none', text: people(k).length + '名' });
       return '<li>' + UI.rowLink('#/ky/' + encodeURIComponent(k.id), {
         count: Number(k.date.slice(8)), unit: Number(k.date.slice(5, 7)) + '月',
         countClass: k.date === U.todayStr() ? '' : 'done',
@@ -102,7 +114,7 @@
         return '<li>' + UI.rowLink('#/ky/' + encodeURIComponent(k.id), {
           count: '済', unit: 'TODAY', countClass: 'done',
           main: k.work || '（作業内容なし）',
-          subHtml: esc(members(k).length + '名　' + (k.leader ? 'リーダー：' + k.leader : '')),
+          subHtml: esc(people(k).length + '名　' + (k.leader ? 'リーダー：' + k.leader : '')),
           tags: g.text ? [{ cls: g.cls === 'ok' ? 'none' : g.cls, text: 'リスク' + g.text }] : []
         }) + '</li>';
       }).join('') + '</ul>' +
@@ -162,12 +174,26 @@
       '</div>';
   }
 
+  /** 参加者1人分（氏名＋自筆サイン） */
+  function memberRowHtml(i, p) {
+    p = p || {};
+    return '<div class="mem-row" data-mem="' + i + '">' +
+      '<div class="mem-no">' + (i + 1) + '</div>' +
+      '<div class="mem-body">' + UI.text('m-n' + i, p.name, '氏名') +
+      Sign.boxHtml('m' + i, {
+        label: '参加者 ' + (i + 1) + ' の自筆サイン',
+        value: p.sign,
+        placeholder: 'ここをタッチして署名'
+      }) + '</div></div>';
+  }
+
   function form(ky, siteId) {
     var isNew = !ky;
     ky = ky || { siteId: siteId, date: U.todayStr(), risks: [] };
     var site = Store.get('sites', ky.siteId);
     if (!site) return MT.notFound('現場が見つかりません。');
     if (!MT.requireSiteAccess(site.id)) return;
+    Sign.reset();
 
     var admin = Session.isAdmin();
     var back = isNew
@@ -187,7 +213,7 @@
       UI.field('会社名', UI.text('f-company', company)) +
       UI.field('リーダー', UI.text('f-leader', ky.leader), true) +
       '</div>' +
-      UI.field('担当者', UI.text('f-recorder', ky.recorder || (Session.user ? Session.user.name : ''))) +
+      UI.field('現場代理人', UI.text('f-agent', agentOf(ky) || (Session.user ? Session.user.name : ''))) +
       UI.field('作業内容', UI.textarea('f-work', ky.work, '例：〇〇地区 掘削工（バックホウ0.45㎥）、残土運搬'), true) +
       '</div>';
 
@@ -198,9 +224,17 @@
     html += UI.h2('GOAL', '本日の行動目標') +
       '<div class="card">' +
       UI.field('行動目標', UI.text('f-goal', ky.goal, '例：旋回範囲に入らない　ヨシ！')) +
-      UI.field('参加者（1行に1人）', UI.textarea('f-members', ky.members, '尾割 順一\n〇〇 〇〇'), false,
-        '入力した人数が「作業員 ○名」になります') +
       '</div>';
+
+    var ppl = people(ky);
+    var memRows = Math.min(MEMBERS, Math.max(4, ppl.length + 1));
+    html += UI.h2('SIGN', '参加者（自筆）') +
+      '<p class="section-note">氏名を入れて、ご本人がサイン欄をタッチして署名してください。' +
+      '入力した人数が「作業員 ○名」になります。</p>' +
+      '<div class="card"><div id="mem-list">';
+    for (var p = 0; p < memRows; p++) html += memberRowHtml(p, ppl[p]);
+    html += '</div>' +
+      UI.btnRow('<button class="btn small plain" id="b-add-mem">参加者を増やす</button>') + '</div>';
 
     html += UI.btnRow('<button class="btn lead block" id="b-save">保存</button>') +
       UI.btnRow('<a class="btn plain" href="' + esc(back) + '">キャンセル</a>' +
@@ -222,6 +256,15 @@
         U.on('#r-s' + i, 'change', function () { refresh(i); });
       })(k);
     }
+
+    U.on('#b-add-mem', 'click', function () {
+      var list = U.qs('#mem-list');
+      var n = list.children.length;
+      if (n >= MEMBERS) return U.toast('この様式に書ける参加者は' + MEMBERS + '名までです');
+      list.insertAdjacentHTML('beforeend', memberRowHtml(n, null));
+      var input = U.qs('#m-n' + n);
+      if (input) input.focus();
+    });
 
     U.on('#b-save', 'click', function () {
       var date = U.val('#f-date');
@@ -250,10 +293,20 @@
       ky.weather = U.val('#f-weather');
       ky.company = U.val('#f-company');
       ky.leader = leader;
-      ky.recorder = U.val('#f-recorder');
+      ky.agent = U.val('#f-agent');
       ky.work = work;
       ky.goal = U.val('#f-goal');
-      ky.members = U.qs('#f-members') ? U.qs('#f-members').value.trim() : '';
+
+      var mem = [];
+      U.qsa('#mem-list .mem-row').forEach(function (row, j) {
+        var nm = U.val('#m-n' + j);
+        var sg = Sign.get('m' + j);
+        if (!nm && !sg) return;
+        mem.push(sg ? { name: nm, sign: sg } : { name: nm });
+      });
+      ky.people = mem;
+      delete ky.members;          // 以前の持ち方（1行に1人の文字）は残さない
+      delete ky.recorder;         // 「担当者」は「現場代理人」に変えた
       ky.risks = risks;
       Store.put('ky', ky);
       U.toast('保存しました');
@@ -300,10 +353,23 @@
       '<tr><th>作業内容</th><td>' + U.nl2br(ky.work) + '</td></tr>' +
       '<tr><th>会社名</th><td>' + esc(ky.company || '－') + '</td></tr>' +
       '<tr><th>リーダー</th><td>' + esc(ky.leader || '－') + '</td></tr>' +
-      '<tr><th>担当者</th><td>' + esc(ky.recorder || '－') + '</td></tr>' +
+      '<tr><th>現場代理人</th><td>' + esc(agentOf(ky) || '－') + '</td></tr>' +
       '<tr><th>本日の行動目標</th><td>' + esc(ky.goal || '－') + '</td></tr>' +
-      '<tr><th>参加者</th><td>' + esc(members(ky).join('、') || '－') + '（' + members(ky).length + '名）</td></tr>' +
       '</tbody></table></div>';
+
+    var mem = people(ky);
+    var signed = mem.filter(function (p) { return !Sign.isEmpty(p.sign); }).length;
+    html += UI.h2('MEMBER', '参加者（' + mem.length + '名）');
+    if (!mem.length) html += UI.empty('入力がありません。');
+    else {
+      html += '<div class="card"><div class="mem-view">' + mem.map(function (p) {
+        var ok = !Sign.isEmpty(p.sign);
+        return '<span class="mem-chip">' +
+          (ok ? '<span class="mem-sig">' + Sign.svg(p.sign) + '</span>' : '') +
+          '<span class="mem-nm' + (ok ? '' : ' unsigned') + '">' + esc(p.name || '（氏名なし）') + '</span></span>';
+      }).join('') + '</div>' +
+        '<p class="section-note">' + signed + '名が自筆で署名しています。</p></div>';
+    }
 
     html += UI.h2('RISK', '危険と対策' + (g.text ? '（最大リスク：' + g.text + '）' : ''));
     var rs = risksOf(ky);
@@ -338,7 +404,7 @@
     if (!ky) return MT.notFound('KY活動表が見つかりません。');
     if (!MT.requireSiteAccess(ky.siteId)) return;
     var site = Store.get('sites', ky.siteId) || {};
-    var mem = members(ky);
+    var mem = people(ky);
     var risks = (ky.risks || []).slice(0, ROWS);
     while (risks.length < ROWS) risks.push({});
 
@@ -367,17 +433,21 @@
       });
     });
 
+    /* 自筆の欄。署名があればその線を、無ければ入力された氏名を載せる */
+    function memCell(p) {
+      return '<td>' + (p ? Sign.inkOr(p.sign, p.name) : '') + '</td>';
+    }
     var cells1 = '', cells2 = '';
     for (var i = 0; i < 6; i++) {
-      cells1 += '<td>' + esc(mem[i] || '') + '</td>';
-      cells2 += '<td>' + esc(mem[i + 6] || '') + '</td>';
+      cells1 += memCell(mem[i]);
+      cells2 += memCell(mem[i + 6]);
     }
 
     U.app().innerHTML = UI.printBar('#/ky/' + encodeURIComponent(ky.id), '用紙の向きは「横」にしてください。') +
       '<div class="print-sheet"><div class="ky-doc">' +
       '<table class="ky-title-row"><tbody><tr>' +
       '<td class="ky-title">リスクアセスメント　ＫＹ　活動表</td>' +
-      '<th class="ky-th">担当者</th><td class="ky-name">' + esc(ky.recorder || '') + '</td>' +
+      '<th class="ky-th">現場代理人</th><td class="ky-name">' + esc(agentOf(ky) || '') + '</td>' +
       '</tr></tbody></table>' +
       '<table class="ky-top"><tbody>' +
       '<tr><th>作業所名：</th><td>' + esc(site.name || '') + '</td>' +
