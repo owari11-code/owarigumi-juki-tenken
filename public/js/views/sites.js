@@ -348,7 +348,7 @@
       '<div class="poster-site">' + esc(site.name) + '</div>' +
       '<div class="poster-qr" id="poster-qr"></div>' +
       '<ol class="poster-steps"><li>スマートフォンのカメラで読み取る</li><li>点検・資材・機械の記録画面が開きます</li><li>ログインは不要です</li></ol>' +
-      '<div class="poster-foot">' + esc(company) + '　／　マル点</div>' +
+      '<div class="poster-foot">' + esc(company) + '　／　GENBA ONE by OWR</div>' +
       '</div></div>';
     UI.drawQr(U.qs('#poster-qr'), url, 420);
     UI.bindPrint();

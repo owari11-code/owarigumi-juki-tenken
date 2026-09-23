@@ -157,6 +157,58 @@
       .sort(U.byDateAsc);
   };
 
+  /** 搬入・搬出の記録を、現場をまたいで全部（持出先を変えても履歴が続くように） */
+  M.machineHistory = function (machine) {
+    return Store.list('machine_logs', function (l) { return l.machineId === machine.id; }).sort(U.byDateAsc);
+  };
+
+  /** すべての重機・機械（現場をまたいだ一覧） */
+  M.allMachines = function (heavyOnly) {
+    return Store.list('machines', function (m) { return !heavyOnly || M.isHeavy(m); }).sort(function (a, b) {
+      if (M.isHeavy(a) !== M.isHeavy(b)) return M.isHeavy(a) ? -1 : 1;
+      return U.byName(a, b);
+    });
+  };
+
+  /** 置場にある（どの現場にも出していない） */
+  M.isAtDepot = function (machine) {
+    var d = M.depot();
+    return !!d && !!machine && machine.siteId === d.id;
+  };
+
+  /** いまどこにあるか */
+  M.machineWhere = function (machine) {
+    if (M.isAtDepot(machine)) return { atDepot: true, site: M.depot(), label: machine.place || '置場' };
+    var s = Store.get('sites', machine.siteId);
+    return { atDepot: false, site: s || null, label: s ? s.name : '（現場が見つかりません）' };
+  };
+
+  /**
+   * 現場へ出す／置場へ戻す。
+   * 出ていた現場に「搬出」、移した先に「搬入」を記録して、台帳の現場を書き換える。
+   */
+  M.moveMachine = function (machine, toSiteId, date, person, note) {
+    var depot = M.ensureDepot();
+    var from = machine.siteId;
+    if (!toSiteId || from === toSiteId) return machine;
+    if (from && from !== depot.id) {
+      Store.put('machine_logs', {
+        siteId: from, machineId: machine.id, type: 'carry_out', date: date, person: person, note: note || ''
+      });
+    }
+    machine.siteId = toSiteId;
+    if (toSiteId === depot.id) {
+      machine.returnedDate = date;
+    } else {
+      Store.put('machine_logs', {
+        siteId: toSiteId, machineId: machine.id, type: 'carry_in', date: date, person: person, note: note || ''
+      });
+      machine.carryInDate = date;
+      machine.returnedDate = '';
+    }
+    return Store.put('machines', machine);
+  };
+
   /** 現場にあるか。記録（搬入・搬出）を優先し、無ければ台帳の日付を使う */
   M.machineState = function (machine) {
     var logs = M.machineLogs(machine);
@@ -175,10 +227,13 @@
     return { state: 'none', inDate: null, outDate: null, label: '搬入の記録なし' };
   };
 
-  /** 機械の注意事項（期限切れ・返却予定など）。現場から搬出済みなら出さない */
+  /**
+   * 機械の注意事項（期限切れ・返却予定など）。
+   * 現場から搬出済みのものは出さない。置場に置いてあるものは、期限を見張り続ける。
+   */
   M.machineWarnings = function (machine) {
     var st = M.machineState(machine);
-    if (st.state === 'out') return [];
+    if (st.state === 'out' && !M.isAtDepot(machine)) return [];
     var UI = global.MT.ui;
     var out = [];
     [['inspectionExpiry', '特定自主検査'], ['shakenExpiry', '車検'], ['insuranceExpiry', '保険']].forEach(function (f) {
@@ -405,6 +460,13 @@
         if (st.state === 'overdue') {
           out.push({ level: 2, site: null, text: '工具「' + tool.name + '」の返却期限が過ぎています（' + (st.lend.borrower || '') + '）', href: '#/tool/' + encodeURIComponent(tool.id) });
         }
+      });
+      // 置場に置いてある重機・機械も、特定自主検査・車検の期限を見る
+      M.allMachines().forEach(function (mc) {
+        if (!M.isAtDepot(mc)) return;
+        M.machineWarnings(mc).forEach(function (w) {
+          out.push({ level: w.level, site: null, text: '置場の「' + mc.name + '」' + w.text, href: '#/machine/' + encodeURIComponent(mc.id) });
+        });
       });
     }
 

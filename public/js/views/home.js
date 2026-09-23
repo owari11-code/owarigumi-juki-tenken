@@ -122,7 +122,7 @@
    * ------------------------------------------------------------------ */
   function fieldHome() {
     var list = Session.fieldSites();
-    var html = UI.pageHead('FIELD', 'マル点');
+    var html = UI.pageHead('FIELD', 'GENBA ONE');
 
     html += UI.btnRow('<a class="btn lead" href="#/scan">■ QRを読み取る</a>');
 

@@ -27,6 +27,17 @@
     return (a.from ? U.formatShort(a.from) : '') + '〜' + (a.to ? U.formatShort(a.to) : '');
   }
 
+  /** 年つきの配置期間と、その日数 */
+  function periodFull(a) {
+    if (!a.from && !a.to) return '期間の定めなし';
+    var s = (a.from ? U.formatDate(a.from) : '（開始日なし）') + ' 〜 ' + (a.to ? U.formatDate(a.to) : '（終了日なし）');
+    if (a.from && a.to) {
+      var n = U.diffDays(a.from, a.to);
+      if (n !== null && n >= 0) s += '（' + (n + 1) + '日間）';
+    }
+    return s;
+  }
+
   /** 期間が重なっている、ほかの現場への配置 */
   function overlaps(a) {
     return M.assignments({ staffId: a.staffId }).filter(function (b) {
@@ -251,11 +262,33 @@
         var start = !a.from || a.from < from ? from : a.from;
         var end = !a.to || a.to > to ? to : a.to;
         var l = pos(start), w = Math.max(1, pos(U.addDays(end, 1)) - l);
-        return '<span class="s-bar c' + colorOf[a.siteId] + '" style="left:' + l + '%;width:' + w + '%;top:' + (2 + (i % 3) * 7) + 'px" title="' +
-          esc(siteName(a.siteId) + '（' + (a.role || '') + '）') + '">' + esc(siteName(a.siteId)) + '</span>';
+        var tip = siteName(a.siteId) + (a.role ? '（' + a.role + '）' : '') + '\n' + periodFull(a);
+        return '<button type="button" class="s-bar c' + colorOf[a.siteId] + '"' +
+          (forPrint ? '' : ' data-as="' + esc(a.id) + '" data-staff="' + esc(s.id) + '"') +
+          ' style="left:' + l + '%;width:' + w + '%;top:' + (2 + (i % 3) * 7) + 'px" title="' +
+          esc(tip) + '">' + esc(siteName(a.siteId)) + '</button>';
       }).join('');
-      return '<div class="g-row' + (bars.length ? '' : ' empty') + '"><div class="g-name">' + esc(s.name) +
-        (bars.length ? '' : '<span class="g-pct">未配置</span>') + '</div><div class="g-track tall">' + track + todayLine + '</div></div>';
+
+      /* 帯をタッチ（またはカーソルを合わせて）開く、配置期間の明細 */
+      var detail = '';
+      if (!forPrint && bars.length) {
+        detail = '<div class="s-detail" data-detail="' + esc(s.id) + '" hidden>' +
+          '<div class="s-detail-head">' + esc(s.name) + ' の配置</div><ul class="s-detail-list">' +
+          bars.map(function (a) {
+            return '<li data-as="' + esc(a.id) + '"><span class="s-chip c' + colorOf[a.siteId] + '"></span>' +
+              '<span class="s-d-body"><a href="#/site/' + encodeURIComponent(a.siteId) + '?tab=staff">' + esc(siteName(a.siteId)) + '</a>' +
+              (a.role ? '<span class="s-d-role">' + esc(a.role) + '</span>' : '') +
+              '<span class="s-d-term">' + esc(periodFull(a)) + '</span>' +
+              (a.note ? '<span class="s-d-note">' + esc(a.note) + '</span>' : '') + '</span>' +
+              '<a class="s-d-edit" href="#/assignment/' + encodeURIComponent(a.id) + '/edit">直す</a></li>';
+          }).join('') + '</ul></div>';
+      }
+
+      var name = forPrint || !bars.length ? esc(s.name)
+        : '<button type="button" class="s-name" data-staff="' + esc(s.id) + '">' + esc(s.name) + '</button>';
+      return '<div class="g-row' + (bars.length ? '' : ' empty') + '"><div class="g-name">' + name +
+        (bars.length ? '' : '<span class="g-pct">未配置</span>') + '</div><div class="g-track tall">' + track + todayLine + '</div></div>' +
+        detail;
     }).join('');
 
     var legend = sites.filter(function (s) { return usedSites[s.id]; }).map(function (s) {
@@ -264,6 +297,44 @@
 
     return '<div class="gantt staffing' + (forPrint ? ' print' : '') + '">' + head + (rows || '<p class="muted">社員が登録されていません。</p>') + '</div>' +
       (legend ? '<div class="legend-row">' + legend + '</div>' : '');
+  }
+
+  /*
+   * 帯・氏名をタッチしたら、その社員の配置期間を開く。
+   * 開いている相手を覚えておき、同期などで画面が描き直されても開いたままにする。
+   */
+  var openStaff = '';
+  var openAs = '';
+
+  function bindStaffing() {
+    var root = U.qs('.gantt.staffing');
+    if (!root) return;
+    var panels = U.qsa('.s-detail');
+
+    function apply() {
+      panels.forEach(function (p) {
+        var mine = p.getAttribute('data-detail') === openStaff;
+        p.hidden = !mine;
+        U.qsa('li', p).forEach(function (li) {
+          li.classList.toggle('on', mine && !!openAs && li.getAttribute('data-as') === openAs);
+        });
+      });
+      U.qsa('.s-bar', root).forEach(function (b) {
+        b.classList.toggle('on', !!openAs && b.getAttribute('data-as') === openAs);
+      });
+    }
+
+    root.addEventListener('click', function (ev) {
+      var t = ev.target.closest ? ev.target.closest('[data-staff]') : null;
+      if (!t) return;
+      var staffId = t.getAttribute('data-staff');
+      var asId = t.getAttribute('data-as') || '';
+      if (!asId && openStaff === staffId) { openStaff = ''; openAs = ''; }  // 氏名をもう一度押したら閉じる
+      else { openStaff = staffId; openAs = asId; }
+      apply();
+    });
+
+    apply();
   }
 
   MT.route('staffing', {}, function (m, params) {
@@ -291,6 +362,7 @@
     html += UI.btnRow('<a class="btn secondary" href="#/assignment/new">＋ 社員を配置する</a><a class="btn secondary" href="#/staff">社員名簿</a>') +
       UI.btnRow('<a class="btn plain" href="#/print/staffing?ym=' + ym + '">配置表を印刷</a>');
     U.app().innerHTML = html;
+    bindStaffing();
   });
 
   MT.route('print/staffing', { print: true }, function (m, params) {

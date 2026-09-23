@@ -1,5 +1,5 @@
 {
-  // マル点クラウド（現場管理クラウド）
+  // GENBA ONE by OWR（現場管理クラウド）
   // 画面（public/）とサーバー処理（src/）を、ひとつのWorkerで動かす設定。
   // name は Cloudflare 上の既存Workerと一致させること（変えると別のURLになります）
   "name": "owarigumi-juki-tenken",

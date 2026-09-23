@@ -1,5 +1,5 @@
 /*
- * マル点（現場管理クラウド）
+ * GENBA ONE by OWR（現場管理クラウド）
  * デザイン: 白地・丸みでやわらげる体裁（案F）。
  *   ・背景は白。面は白いカードを、細い罫とやわらかい影で浮かせる
  *   ・角は大きく丸め、押すものは端まで丸くする（手袋でも狙いやすい）
@@ -837,7 +837,7 @@ table.data.two-up .i-res { width: 18%; }
 }
 
 /* ------------------------------------------------------------------ *
- * マル点クラウドで追加した部分
+ * 現場管理クラウドで追加した部分
  * （事務所のナビ・タブ・指標・注意事項・工程表・配置表・資材・工具・帳票）
  * ------------------------------------------------------------------ */
 :root { --amber: #b8860b; --amber-bg: rgba(216, 194, 106, .16); }
@@ -1534,3 +1534,51 @@ ul.en-pledge { margin: 0 0 8px; padding-left: 1.2em; font-size: 10.5px; line-hei
 .en-sign td { height: 46px; }
 .en-sign .sign-cell { height: 40px; }
 .sign-view { height: 90px; }
+
+/* 決まった選択肢＋「その他」の自由記入 */
+.pick-other > input[type="text"] { margin-top: 6px; }
+
+/* ---------- 人員配置：帯を押すと出る明細 ---------- */
+.s-bar {
+  border: 0;
+  border-radius: 3px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.s-bar.on { outline: 2px solid var(--navy); outline-offset: 1px; }
+.s-name {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.s-detail {
+  margin: 0 0 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--divider);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+}
+.s-detail-head { font-size: 12.5px; font-weight: 700; margin-bottom: 4px; }
+.s-detail-list { list-style: none; margin: 0; padding: 0; }
+.s-detail-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 4px;
+  border-top: 1px solid var(--hairline);
+}
+.s-detail-list li:first-child { border-top: none; }
+.s-detail-list li.on { background: var(--accent-100); border-radius: 6px; }
+.s-chip { flex: none; width: 12px; height: 12px; margin-top: 4px; border-radius: 3px; }
+.s-d-body { flex: 1; min-width: 0; font-size: 13.5px; line-height: 1.5; }
+.s-d-role { margin-left: 8px; font-size: 12px; color: var(--muted); }
+.s-d-term { display: block; font-size: 13px; }
+.s-d-note { display: block; font-size: 12px; color: var(--muted); }
+.s-d-edit { flex: none; align-self: center; font-size: 12.5px; }

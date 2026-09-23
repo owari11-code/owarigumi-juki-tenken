@@ -76,6 +76,42 @@
         esc(o[1]) + '</option>';
     }).join('') + '</select>';
   };
+  /**
+   * 決まった選択肢と、「その他」の自由記入を組にしたもの。
+   * これまでに入っている値が選択肢に無ければ、「その他」として残す（古い記録を消さないため）。
+   *   組み立て … UI.pickOther('f-place', 選択肢, いまの値, '書き方の例')
+   *   画面に出したあと … UI.bindPickOther('f-place')
+   *   取り出し … UI.pickOtherValue('f-place')
+   */
+  UI.pickOther = function (id, options, value, placeholder) {
+    var v = value || '';
+    var known = options.indexOf(v) >= 0;
+    var opts = [['', '（選ぶ）']]
+      .concat(options.map(function (o) { return [o, o]; }))
+      .concat([['__other', 'その他（下に書く）']]);
+    return '<div class="pick-other">' +
+      UI.select(id, opts, known ? v : (v ? '__other' : '')) +
+      '<input type="text" id="' + id + '-other" value="' + esc(known ? '' : v) + '"' +
+      (placeholder ? ' placeholder="' + esc(placeholder) + '"' : '') +
+      (known || !v ? ' hidden' : '') + '>' +
+      '</div>';
+  };
+
+  UI.bindPickOther = function (id) {
+    var sel = U.qs('#' + id);
+    var box = U.qs('#' + id + '-other');
+    if (!sel || !box) return;
+    sel.addEventListener('change', function () {
+      box.hidden = sel.value !== '__other';
+      if (!box.hidden) box.focus();
+    });
+  };
+
+  UI.pickOtherValue = function (id) {
+    var v = U.val('#' + id);
+    return v === '__other' ? U.val('#' + id + '-other') : v;
+  };
+
   UI.checkbox = function (id, label, checked) {
     return '<label class="check-line"><input type="checkbox" id="' + id + '"' + (checked ? ' checked' : '') + '>' +
       '<span>' + esc(label) + '</span></label>';

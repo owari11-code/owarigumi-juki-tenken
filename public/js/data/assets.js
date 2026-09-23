@@ -32,6 +32,15 @@
     { id: 'retired', name: '廃棄・使用中止' }
   ];
 
+  /* 工具・重機の保管場所。ここに足せば、登録画面の選択肢に出る */
+  var PLACES = [
+    '土場倉庫（小原支所）',
+    '土場倉庫（大坂）',
+    '土場（セラ前）',
+    '土場（駐在横）',
+    '本社'
+  ];
+
   var SITE_STATUS = [
     { id: 'planned', name: '着工前' },
     { id: 'active', name: '施工中' },
@@ -58,6 +67,7 @@
     EQUIPMENT_TYPES: EQUIPMENT_TYPES,
     TOOL_KINDS: TOOL_KINDS,
     TOOL_STATUS: TOOL_STATUS,
+    PLACES: PLACES,
     SITE_STATUS: SITE_STATUS,
     ASSIGN_ROLES: ASSIGN_ROLES,
     STOCK_TYPES: STOCK_TYPES,

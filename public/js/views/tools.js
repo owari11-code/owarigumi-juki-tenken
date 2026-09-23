@@ -132,13 +132,15 @@
       UI.field('メーカー', UI.text('f-maker', tool.maker)) +
       UI.field('型式', UI.text('f-model', tool.model)) +
       '</div>' +
-      UI.field('保管場所', UI.text('f-place', tool.place, '例：本社倉庫 棚B')) +
+      UI.field('保管場所', UI.pickOther('f-place', A.PLACES, tool.place, '例：本社 倉庫 棚B')) +
       UI.field('状態', UI.select('f-status', A.TOOL_STATUS.map(function (s) { return [s.id, s.name]; }), tool.status || 'ok')) +
       UI.field('次回の点検日（任意）', UI.date('f-due', tool.checkDue), false, '絶縁抵抗測定など、定期点検の予定日') +
       UI.field('備考', UI.textarea('f-note', tool.note)) +
       '</div>' +
       UI.btnRow('<button class="btn" id="b-save">保存</button><a class="btn plain" href="' + esc(back) + '">キャンセル</a>') +
       (isNew ? '' : UI.btnRow('<button class="btn danger" id="b-del">この工具を削除</button>'));
+
+    UI.bindPickOther('f-place');
 
     U.on('#b-save', 'click', function () {
       var name = U.val('#f-name');
@@ -148,7 +150,7 @@
       tool.kind = U.val('#f-kind');
       tool.maker = U.val('#f-maker');
       tool.model = U.val('#f-model');
-      tool.place = U.val('#f-place');
+      tool.place = UI.pickOtherValue('f-place');
       tool.status = U.val('#f-status');
       tool.checkDue = U.val('#f-due');
       tool.note = U.val('#f-note');

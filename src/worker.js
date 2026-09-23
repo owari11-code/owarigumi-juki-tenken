@@ -1,5 +1,5 @@
 /*
- * worker.js - マル点クラウドの入口（Cloudflare Workers）
+ * worker.js - GENBA ONE by OWR の入口（Cloudflare Workers）
  *
  * /api/... はここで受け持ち、それ以外は public/ の画面ファイルを返す。
  * 表に載っていない経路・メソッドは通さない（削除の経路はそもそも無い）。

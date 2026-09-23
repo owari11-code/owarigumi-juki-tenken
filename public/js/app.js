@@ -37,6 +37,7 @@
     var p = U.parseHash().path;
     var key = !p.length ? 'home'
       : (p[0] === 'sites' || p[0] === 'site') ? 'sites'
+      : (p[0] === 'machines' || p[0] === 'machine') ? 'machines'
       : (p[0] === 'tools' || p[0] === 'tool') ? 'tools'
       : (p[0] === 'staffing' || p[0] === 'staff') ? 'staff'
       : (p[0] === 'settings' || p[0] === 'users') ? 'settings' : '';

@@ -68,7 +68,7 @@
     if (text.indexOf('#i=') >= 0) {
       return failed('古い形式のQRコードです。事務所で新しいQRコードを印刷してもらってください。');
     }
-    failed('このQRコードは、マル点のQRコードではありません。<br><span class="muted">読み取った内容：' + esc(text.slice(0, 120)) + '</span>');
+    failed('このQRコードは、GENBA ONE のQRコードではありません。<br><span class="muted">読み取った内容：' + esc(text.slice(0, 120)) + '</span>');
   }
 
   function tick() {

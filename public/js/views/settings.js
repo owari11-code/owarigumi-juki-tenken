@@ -141,7 +141,7 @@
     });
 
     U.on('#b-export', 'click', function () {
-      U.download('マル点データ_' + U.todayStr() + '.json', Store.exportAll(), 'application/json');
+      U.download('GENBA_ONE_データ_' + U.todayStr() + '.json', Store.exportAll(), 'application/json');
     });
 
     U.on('#b-clear', 'click', function () {
