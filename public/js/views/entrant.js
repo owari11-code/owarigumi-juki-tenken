@@ -425,8 +425,10 @@
       '<tr><th>氏　名</th><td colspan="5">' + esc(e.name || '') + '</td></tr>' +
       '<tr><th>現住所</th><td colspan="3">' + esc(e.address || '') + '</td><th>TEL</th><td>' + esc(e.tel || '') + '</td></tr>' +
       '</tbody></table>' +
-      '<table class="doc-table en-table"><thead><tr>' +
-      '<th class="en-side" rowspan="3">緊急連絡先</th><th>氏　　　名</th><th>続柄</th><th>電話番号</th><th>現　住　所</th></tr></thead><tbody>' +
+      // 縦の結合（rowspan）は thead から tbody へは効かないので、1つの tbody にまとめる
+      '<table class="doc-table en-table"><tbody>' +
+      '<tr><th class="en-side" rowspan="' + (em.length + 1) + '">緊急連絡先</th>' +
+      '<th>氏　　　名</th><th>続柄</th><th>電話番号</th><th>現　住　所</th></tr>' +
       em.map(function (x) {
         return '<tr><td>' + esc(x.name || '') + '</td><td>' + esc(x.rel || '') + '</td>' +
           '<td>' + esc(x.tel || '') + '</td><td>' + esc(x.address || '') + '</td></tr>';

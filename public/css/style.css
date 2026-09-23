@@ -305,6 +305,9 @@ label.field { display: block; margin-bottom: 12px; }
 label.field > span { display: block; font-size: 12.5px; font-weight: 700; margin-bottom: 5px; color: rgba(29, 31, 32, .75); }
 input[type="text"], input[type="date"], input[type="time"], input[type="number"], input[type="url"], input[type="password"], input[type="month"], select, textarea {
   width: 100%;
+  /* min-width を 0 にしないと、日付欄などが自前の幅を主張して隣の欄に重なる */
+  min-width: 0;
+  max-width: 100%;
   min-height: 52px;
   padding: 10px 12px;
   border: 1px solid rgba(33, 42, 44, .28);
@@ -316,8 +319,12 @@ input[type="text"], input[type="date"], input[type="time"], input[type="number"]
 }
 input:focus-visible, select:focus-visible, textarea:focus-visible { border-color: var(--accent); outline-offset: 0; }
 textarea { min-height: 84px; resize: vertical; }
-.field-row { display: flex; gap: 10px; }
-.field-row > label.field { flex: 1; }
+/* 横に並べる欄。幅が足りないときは、重ならずに下へ折り返す */
+.field-row { display: flex; flex-wrap: wrap; gap: 10px; }
+.field-row > label.field { flex: 1 1 152px; min-width: 0; }
+/* 日付の欄は、iPhone などで中の日付が切れないだけの幅を確保する。
+   2つ並ばない幅（スマートフォン）では、重ならずに上下に分かれる */
+.field-row > label.field:has(input[type="date"]) { flex-basis: 190px; }
 .required { color: var(--red); font-size: 11px; margin-left: 5px; }
 
 /* ---------- 点検フォーム ---------- */
