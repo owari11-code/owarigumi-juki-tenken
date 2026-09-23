@@ -26,7 +26,8 @@
   var ZOOM = { day: 22, week: 8, month: 3 };
   var zoom = null;              // 'day' | 'week' | 'month'（画面を開いている間だけ覚える）
   var scrollMemo = {};          // 現場ごとの横スクロール位置
-  var ROW_H = 34;
+  var big = false;              // 工程表を画面いっぱいに広げているか
+  var lastGroup = '';           // 続けて追加するときのために、前に入れた工種を残す
 
   /** その日の全体進捗を記録（1現場・1日につき1件） */
   function snapshot(siteId) {
@@ -170,24 +171,33 @@
       lines += '<span class="ge-today" style="left:' + (U.diffDays(r.from, today) * px + px / 2) + 'px"></span>';
     }
 
-    var side = '<div class="ge-side-head">工種</div>';
+    var side = '<div class="ge-side-head">工種・種別</div>';
     var tracks = '';
+    var prevGroup = null;
     tasks.forEach(function (t) {
       var prog = U.clamp(U.num(t.progress) || 0, 0, 100);
+      var g = String(t.group || '').trim();
       side += '<div class="ge-name" data-task="' + esc(t.id) + '">' +
-        '<a href="#/task/' + encodeURIComponent(t.id) + '/edit" title="' + esc(t.name) + '">' + esc(t.name) + '</a>' +
+        '<span class="ge-nm">' +
+        '<span class="ge-g' + (g && g === prevGroup ? ' cont' : '') + '">' + esc(g || '（工種なし）') + '</span>' +
+        '<a href="#/task/' + encodeURIComponent(t.id) + '/edit" title="' + esc((g ? g + '／' : '') + t.name) + '">' +
+        esc(t.name) + '</a></span>' +
         '<button class="ge-rev' + (M.hasRev(t) ? ' on' : '') + '" data-rev="' + esc(t.id) +
         '" title="変更後の工程（緑の帯）">変</button>' +
         '<b class="' + (prog >= 100 ? 'ok' : '') + '">' + U.fmtNum(prog, 0) + '%</b></div>';
       tracks += '<div class="ge-track" data-task="' + esc(t.id) + '">' + barHtml(t, r, px, today) + '</div>';
+      prevGroup = g;
     });
 
     side += '<div class="ge-name new">' +
-      '<input type="text" id="ge-new" maxlength="40" placeholder="工種名（例：掘削工）">' +
-      '<button class="ge-add" id="ge-add" title="工種を追加">＋</button></div>';
-    tracks += '<div class="ge-track new" data-task=""><span class="ge-hint">ここを横にドラッグすると、工種を追加できます</span></div>';
+      '<span class="ge-nm">' +
+      '<input type="text" id="ge-new-g" maxlength="40" placeholder="工種（大分類）" value="' + esc(lastGroup) + '">' +
+      '<input type="text" id="ge-new" maxlength="40" placeholder="種別（中分類）">' +
+      '</span>' +
+      '<button class="ge-add" id="ge-add" title="追加">＋</button></div>';
+    tracks += '<div class="ge-track new" data-task=""><span class="ge-hint">ここを横にドラッグすると、その期間で追加できます</span></div>';
 
-    return '<div class="ge" id="ge">' +
+    return '<div class="ge-wrap' + (big ? ' big' : '') + '" id="ge-wrap"><div class="ge" id="ge">' +
       '<div class="ge-side" style="--head-h:' + headH + 'px">' + side + '</div>' +
       '<div class="ge-scroll" id="ge-scroll"><div class="ge-body" style="width:' + width + 'px" ' +
       'data-px="' + px + '" data-from="' + r.from + '" data-total="' + r.days + '">' +
@@ -200,9 +210,10 @@
         return '<button class="ge-z' + (k === z ? ' on' : '') + '" data-zoom="' + k + '">' +
           (k === 'day' ? '日' : k === 'week' ? '週' : '月') + '</button>';
       }).join('') + '</span>' +
+      '<button class="ge-z ge-big" id="ge-big">' + (big ? '元の大きさに戻す' : '大きく表示') + '</button>' +
       '<span class="legend"><span class="lg-plan">黒の枠</span>＝予定　<span class="lg-actual">赤</span>＝実績（進捗）　' +
       '<span class="lg-rev">緑</span>＝変更（「変」で作る）　うすい赤の地＝10ポイント以上の遅れ　破線＝今日</span>' +
-      '</div>';
+      '</div></div>';
   }
 
   /* ------------------------------------------------------------------ *
@@ -346,14 +357,17 @@
         U.toast('保存しました');
       } else {
         var input = document.getElementById('ge-new');
-        var name = (input && input.value.trim()) || '新しい工種';
+        var gInput = document.getElementById('ge-new-g');
+        var name = (input && input.value.trim()) || '新しい種別';
+        var group = gInput ? gInput.value.trim() : '';
+        lastGroup = group;
         if (input) input.value = '';
         Store.put('tasks', {
-          siteId: site.id, name: name, planStart: ps, planEnd: pe,
+          siteId: site.id, group: group, name: name, planStart: ps, planEnd: pe,
           progress: 0, weight: null, note: ''
         });
         snapshot(site.id);
-        U.toast('「' + name + '」を追加しました');
+        U.toast('「' + (group ? group + '／' : '') + name + '」を追加しました');
       }
       MT.rerender();
     }
@@ -363,15 +377,18 @@
 
     function addByName() {
       var input = document.getElementById('ge-new');
+      var gInput = document.getElementById('ge-new-g');
       var name = input ? input.value.trim() : '';
-      if (!name) { if (input) input.focus(); return U.toast('工種名を入力してください'); }
+      if (!name) { if (input) input.focus(); return U.toast('種別（中分類）を入力してください'); }
+      var group = gInput ? gInput.value.trim() : '';
+      lastGroup = group;
       var start = U.isDate(site.periodFrom) && site.periodFrom > U.todayStr() ? site.periodFrom : U.todayStr();
       Store.put('tasks', {
-        siteId: site.id, name: name, planStart: start, planEnd: U.addDays(start, 6),
+        siteId: site.id, group: group, name: name, planStart: start, planEnd: U.addDays(start, 6),
         progress: 0, weight: null, note: ''
       });
       snapshot(site.id);
-      U.toast('「' + name + '」を追加しました。帯をドラッグして期間を合わせてください');
+      U.toast('「' + (group ? group + '／' : '') + name + '」を追加しました。帯をドラッグして期間を合わせてください');
       MT.rerender();
     }
 
@@ -399,6 +416,18 @@
 
     U.on('#ge-add', 'click', addByName);
     U.on('#ge-new', 'keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); addByName(); } });
+    U.on('#ge-new-g', 'keydown', function (e) {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      var n = document.getElementById('ge-new');
+      if (n) n.focus();
+    });
+
+    /* 画面いっぱいに広げる（日数の多い工程を見渡すため） */
+    U.on('#ge-big', 'click', function () {
+      big = !big;
+      MT.rerender();
+    });
   }
 
   /* ------------------------------------------------------------------ *
@@ -545,12 +574,9 @@
     var R_HEAD = 4;                      // 表の見出し（年度／月／日）の最初の行
     var R_BODY = R_HEAD + 3;             // 種別の最初の行
 
-    var sumW = 0;
-    tasks.forEach(function (t) { sumW += (U.num(t.weight) > 0 ? U.num(t.weight) : 1); });
-    function ratioOf(t) {
-      var w = U.num(t.weight) > 0 ? U.num(t.weight) : 1;
-      return sumW ? w / sumW * 100 : 0;
-    }
+    /* 構成比率。積算金額が入っていれば金額から、無ければ重みから出す（合計100%） */
+    var ratios = M.taskRatios(tasks);
+    function ratioOf(t) { return ratios.byId[t.id] || 0; }
 
     /* ---- 書式 ---- */
     var BOX = { l: 'thin', r: 'thin', t: 'thin', b: 'thin' };
@@ -1013,13 +1039,38 @@
       if (tasks.length) {
         html += UI.h2('CURVE', '出来形（全体進捗率）') + '<div class="card">' + curveSvg(site, tasks) + '</div>';
 
+        var ratios = M.taskRatios(tasks);
+        var contract = U.num(site.contractAmount);
+
+        html += UI.h2('AMOUNT', '金額と構成比率') + '<div class="card">' +
+          '<table class="kv"><tbody>' +
+          '<tr><th>請負金額</th><td>' + (contract ? U.fmtNum(contract, 0) + ' 円' :
+            '<span class="muted">未入力（<a href="#/site/' + sid + '/edit">現場の編集</a>で入れられます）</span>') + '</td></tr>' +
+          '<tr><th>内訳の合計</th><td>' + (ratios.amountSum ? U.fmtNum(ratios.amountSum, 0) + ' 円' +
+            (contract ? '　<span class="muted">請負金額の ' + U.fmtNum(ratios.amountSum / contract * 100, 1) + '%</span>' : '')
+            : '<span class="muted">未入力</span>') + '</td></tr>' +
+          (ratios.fromAmount && ratios.missing
+            ? '<tr><th>金額が未入力</th><td class="warn-text">' + ratios.missing + ' 件（構成比率がほぼ0になります）</td></tr>'
+            : '') +
+          '</tbody></table>' +
+          UI.btnRow('<a class="btn small secondary" href="#/breakdown?site=' + sid + '">請負代金内訳書を読み込む</a>') +
+          '<p class="section-note">' + (ratios.fromAmount
+            ? '構成比率は、入力した積算金額から出しています。'
+            : '積算金額を入れると、構成比率が金額から出ます（いまは「重み」で計算しています）。') + '</p></div>';
+
         html += UI.h2('PROGRESS', '数字で入力');
         html += '<div class="card"><p class="section-note">細かく合わせたいときは、ここに数字で入れてください。</p>' +
-          '<div class="table-scroll"><table class="data progress-table"><thead><tr><th>工種</th><th>予定期間</th><th class="r">重み</th><th class="r">予定</th><th class="r">実績（%）</th></tr></thead><tbody>' +
+          '<div class="table-scroll"><table class="data progress-table"><thead><tr>' +
+          '<th>工種（大分類）</th><th>種別（中分類）</th><th>予定期間</th>' +
+          '<th class="r">積算金額</th><th class="r">構成比率</th><th class="r">予定</th><th class="r">実績（%）</th>' +
+          '</tr></thead><tbody>' +
           tasks.map(function (t) {
-            return '<tr><td><a href="#/task/' + encodeURIComponent(t.id) + '/edit">' + esc(t.name) + '</a></td>' +
+            var amt = U.num(t.amount);
+            return '<tr><td>' + esc(t.group || '－') + '</td>' +
+              '<td><a href="#/task/' + encodeURIComponent(t.id) + '/edit">' + esc(t.name) + '</a></td>' +
               '<td class="nowrap">' + esc(U.formatShort(t.planStart)) + '〜' + esc(U.formatShort(t.planEnd)) + '</td>' +
-              '<td class="r">' + esc(t.weight === null || t.weight === undefined || t.weight === '' ? '－' : U.fmtNum(U.num(t.weight))) + '</td>' +
+              '<td class="r">' + (amt ? U.fmtNum(amt, 0) : '－') + '</td>' +
+              '<td class="r">' + U.fmtNum(ratios.byId[t.id], 1) + '%</td>' +
               '<td class="r">' + U.fmtNum(M.taskPlanned(t, U.todayStr()), 0) + '%</td>' +
               '<td class="r"><input type="number" class="pct-input" min="0" max="100" step="1" data-task="' + esc(t.id) + '" value="' + esc(U.num(t.progress) || 0) + '"></td></tr>';
           }).join('') + '</tbody></table></div>' +
@@ -1079,17 +1130,23 @@
     if (!site) return MT.notFound('現場が見つかりません。');
     var back = '#/site/' + encodeURIComponent(site.id) + '?tab=schedule';
     U.app().innerHTML = UI.backLink(back, '工程へ戻る') +
-      UI.pageHead('TASK', isNew ? '工種の追加' : '工種の編集') +
+      UI.pageHead('TASK', isNew ? '工種・種別の追加' : '工種・種別の編集') +
       '<p class="muted">' + esc(site.name) + (site.periodFrom ? '　工期 ' + esc(U.periodText(site.periodFrom, site.periodTo)) : '') + '</p>' +
       '<div class="card">' +
-      UI.field('工種', UI.text('f-name', task.name, '例：準備工／掘削工／コンクリート工'), true) +
+      '<p class="section-note">請負代金内訳書と同じ並びで入れてください。' +
+      '<strong>工種（大分類）＝砂防土工　／　種別（中分類）＝掘削工　／　数量（小分類）＝50.0 m3</strong></p>' +
+      UI.field('工種（大分類）', UI.text('f-group', task.group, '例：砂防土工／法面工／コンクリート堰堤工'), false,
+        '実施工程表（Excel）の「工種」欄に入ります。同じものが続くと縦に1つにまとまります') +
+      UI.field('種別（中分類）', UI.text('f-name', task.name, '例：掘削工／盛土工／作業土工'), true,
+        '実施工程表（Excel）の「種別」欄に入ります') +
       '<div class="field-row">' +
-      UI.field('大分類', UI.text('f-group', task.group, '例：砂防土工／法面工'), false, '実施工程表（Excel）の「工種」欄に入ります') +
-      UI.field('数量', UI.number('f-qty', task.qty, ' step="any" min="0"'), false, '空欄でもかまいません') +
+      UI.field('数量（小分類）', UI.number('f-qty', task.qty, ' step="any" min="0"'), false, '空欄でもかまいません') +
       UI.field('単位', UI.text('f-unit', task.unit, '例：m3／m2／式'), false) + '</div>' +
+      UI.field('積算金額（円）', UI.number('f-amount', task.amount, ' step="1" min="0"'), false,
+        '請負代金内訳書の金額。入れると構成比率が自動で出ます') +
       '<div class="field-row">' + UI.field('予定（開始）', UI.date('f-ps', task.planStart || site.periodFrom), true) +
       UI.field('予定（終了）', UI.date('f-pe', task.planEnd || site.periodTo), true) + '</div>' +
-      '<div class="field-row">' + UI.field('重み', UI.number('f-weight', task.weight, ' step="any" min="0"'), false, '金額の構成比など。空欄なら均等') +
+      '<div class="field-row">' + UI.field('重み', UI.number('f-weight', task.weight, ' step="any" min="0"'), false, '金額を入れたときは使いません。空欄なら均等') +
       UI.field('進捗（%）', UI.number('f-progress', U.num(task.progress) || 0, ' step="1" min="0" max="100"')) + '</div>' +
       '<div class="field-row">' +
       UI.field('変更（開始）', UI.date('f-rs', task.revStart), false, '工程を組み替えたときに入れます（緑の帯）') +
@@ -1103,7 +1160,7 @@
     U.on('#b-save', 'click', function () {
       var name = U.val('#f-name'), ps = U.val('#f-ps'), pe = U.val('#f-pe');
       var prog = U.num(U.val('#f-progress'));
-      if (!name) return U.toast('工種を入力してください');
+      if (!name) return U.toast('種別（中分類）を入力してください');
       if (!U.isDate(ps) || !U.isDate(pe)) return U.toast('予定期間を入力してください');
       if (ps > pe) return U.toast('予定の終了日は開始日より後にしてください');
       if (prog === null || prog < 0 || prog > 100) return U.toast('進捗は0〜100で入力してください');
@@ -1111,6 +1168,7 @@
       task.group = U.val('#f-group');
       task.qty = U.num(U.val('#f-qty'));
       task.unit = U.val('#f-unit');
+      task.amount = U.num(U.val('#f-amount'));
       task.planStart = ps;
       task.planEnd = pe;
       task.weight = U.num(U.val('#f-weight'));

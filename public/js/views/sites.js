@@ -80,6 +80,8 @@
       UI.field('発注者', UI.text('f-client', site.client, '例：愛知県○○建設事務所')) +
       UI.field('工事場所', UI.text('f-location', site.location, '例：豊田市○○町地内')) +
       UI.field('工事延長・数量', UI.text('f-extent', site.extent, '例：L=34.4m'), false, '実施工程表（Excel）の「工事延長」欄に入ります') +
+      UI.field('請負金額（円）', UI.number('f-amount', site.contractAmount, ' step="1" min="0"'), false,
+        '税込の契約金額。工種ごとの積算金額を入れると、請負金額に対する割合が出ます') +
       '<div class="field-row">' +
       UI.field('工期（開始）', UI.date('f-from', site.periodFrom)) +
       UI.field('工期（終了）', UI.date('f-to', site.periodTo)) +
@@ -107,6 +109,7 @@
       site.client = U.val('#f-client');
       site.location = U.val('#f-location');
       site.extent = U.val('#f-extent');
+      site.contractAmount = U.num(U.val('#f-amount'));
       site.periodFrom = from;
       site.periodTo = to;
       site.manager = U.val('#f-manager');

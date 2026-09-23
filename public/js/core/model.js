@@ -313,10 +313,38 @@
     });
   };
 
+  /**
+   * 工程の重み。積算金額（amount）が入っていれば、それをそのまま重みにする。
+   * 金額を入れていない工種は「1」のままなので、金額を入れた工種にくらべてほぼ0として扱われる
+   * （画面では、金額の入っていない工種を数えて知らせる）。
+   */
   function weight(t) {
+    var a = U.num(t.amount);
+    if (a !== null && a > 0) return a;
     var w = U.num(t.weight);
     return w !== null && w > 0 ? w : 1;
   }
+  M.taskWeight = weight;
+
+  /** 工種ごとの構成比率（合計100%）と、金額の内訳 */
+  M.taskRatios = function (tasks) {
+    var total = 0, amountSum = 0, withAmount = 0;
+    tasks.forEach(function (t) {
+      total += weight(t);
+      var a = U.num(t.amount);
+      if (a !== null && a > 0) { amountSum += a; withAmount++; }
+    });
+    var byId = {};
+    tasks.forEach(function (t) { byId[t.id] = total > 0 ? weight(t) / total * 100 : 0; });
+    return {
+      byId: byId,
+      total: total,
+      amountSum: amountSum,
+      withAmount: withAmount,
+      missing: tasks.length - withAmount,
+      fromAmount: withAmount > 0
+    };
+  };
 
   /** 変更後の期間が入っているか */
   M.hasRev = function (t) { return U.isDate(t.revStart) && U.isDate(t.revEnd); };
