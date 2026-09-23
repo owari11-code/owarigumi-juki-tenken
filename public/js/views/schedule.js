@@ -211,6 +211,7 @@
           (k === 'day' ? '日' : k === 'week' ? '週' : '月') + '</button>';
       }).join('') + '</span>' +
       '<button class="ge-z ge-big" id="ge-big">' + (big ? '元の大きさに戻す' : '大きく表示') + '</button>' +
+      '<button class="ge-z ge-big" id="ge-sort" title="行の並びを、いまの予定日の順にそろえます">日付順に並べ直す</button>' +
       '<span class="legend"><span class="lg-plan">黒の枠</span>＝予定　<span class="lg-actual">赤</span>＝実績（進捗）　' +
       '<span class="lg-rev">緑</span>＝変更（「変」で作る）　うすい赤の地＝10ポイント以上の遅れ　破線＝今日</span>' +
       '</div></div>';
@@ -364,7 +365,7 @@
         if (input) input.value = '';
         Store.put('tasks', {
           siteId: site.id, group: group, name: name, planStart: ps, planEnd: pe,
-          progress: 0, weight: null, note: ''
+          order: M.nextTaskOrder(site.id), progress: 0, weight: null, note: ''
         });
         snapshot(site.id);
         U.toast('「' + (group ? group + '／' : '') + name + '」を追加しました');
@@ -385,7 +386,7 @@
       var start = U.isDate(site.periodFrom) && site.periodFrom > U.todayStr() ? site.periodFrom : U.todayStr();
       Store.put('tasks', {
         siteId: site.id, group: group, name: name, planStart: start, planEnd: U.addDays(start, 6),
-        progress: 0, weight: null, note: ''
+        order: M.nextTaskOrder(site.id), progress: 0, weight: null, note: ''
       });
       snapshot(site.id);
       U.toast('「' + (group ? group + '／' : '') + name + '」を追加しました。帯をドラッグして期間を合わせてください');
@@ -426,6 +427,14 @@
     /* 画面いっぱいに広げる（日数の多い工程を見渡すため） */
     U.on('#ge-big', 'click', function () {
       big = !big;
+      MT.rerender();
+    });
+
+    /* 行の並びを、いまの予定日の順にそろえ直す */
+    U.on('#ge-sort', 'click', function () {
+      if (!confirm('行の並びを、いまの予定日の順にそろえます。よろしいですか？')) return;
+      M.reorderTasksByDate(site.id);
+      U.toast('日付順に並べ直しました');
       MT.rerender();
     });
   }
@@ -1018,6 +1027,7 @@
     },
     render: function (site) {
       var sid = encodeURIComponent(site.id);
+      M.ensureTaskOrder(site.id);        // 並び順の無い記録に、いま見えている順で番号を付ける
       var tasks = M.tasks(site.id);
       var p = M.progress(site.id);
       var label = M.progressLabel(p);
@@ -1177,7 +1187,7 @@
    * ------------------------------------------------------------------ */
   function taskForm(task, siteId) {
     var isNew = !task;
-    task = task || { siteId: siteId, progress: 0 };
+    task = task || { siteId: siteId, progress: 0, order: M.nextTaskOrder(siteId) };
     var site = Store.get('sites', task.siteId);
     if (!site) return MT.notFound('現場が見つかりません。');
     var back = '#/site/' + encodeURIComponent(site.id) + '?tab=schedule';

@@ -306,11 +306,61 @@
   /* ------------------------------------------------------------------ *
    * 工程（進捗率）
    * ------------------------------------------------------------------ */
+  /**
+   * 工程の行。並び順（order）で並べる。
+   * 予定の期間を前後に動かしても行が上下しないよう、日付では並べ替えない。
+   * order がまだ無い記録は、これまでどおり日付順に置く（ensureTaskOrder で番号を付ける）。
+   */
   M.tasks = function (siteId) {
     return Store.list('tasks', null, siteId).sort(function (a, b) {
-      var x = (a.planStart || '9999') + (a.order || 0), y = (b.planStart || '9999') + (b.order || 0);
+      var oa = U.num(a.order), ob = U.num(b.order);
+      if (oa !== null && ob !== null) {
+        if (oa !== ob) return oa - ob;
+      } else if (oa !== null) return -1;
+      else if (ob !== null) return 1;
+      var x = a.planStart || '9999', y = b.planStart || '9999';
       return x < y ? -1 : x > y ? 1 : U.byName(a, b);
     });
+  };
+
+  /** いちばん後ろに足すときの並び順 */
+  M.nextTaskOrder = function (siteId) {
+    var max = 0;
+    Store.list('tasks', null, siteId).forEach(function (t) {
+      var o = U.num(t.order);
+      if (o !== null && o > max) max = o;
+    });
+    return max + 1;
+  };
+
+  /**
+   * 並び順の無い記録に、いま見えている順（日付順）で番号を付ける。
+   * 1度だけ動き、そのあとは日付を動かしても並びが変わらなくなる。
+   */
+  M.ensureTaskOrder = function (siteId) {
+    var list = M.tasks(siteId);
+    var n = 0;
+    list.forEach(function (t, i) {
+      if (U.num(t.order) !== null) return;
+      t.order = i + 1;
+      Store.put('tasks', t);
+      n++;
+    });
+    return n;
+  };
+
+  /** 並び順を、いまの予定日の順に付け直す */
+  M.reorderTasksByDate = function (siteId) {
+    var list = Store.list('tasks', null, siteId).sort(function (a, b) {
+      var x = a.planStart || '9999', y = b.planStart || '9999';
+      return x < y ? -1 : x > y ? 1 : U.byName(a, b);
+    });
+    list.forEach(function (t, i) {
+      if (U.num(t.order) === i + 1) return;
+      t.order = i + 1;
+      Store.put('tasks', t);
+    });
+    return list.length;
   };
 
   /**

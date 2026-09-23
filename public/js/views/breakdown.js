@@ -300,24 +300,29 @@
       var per = Math.max(3, Math.round(bodySpan / use.length));
       var step = use.length > 1 ? (bodySpan - per) / (use.length - 1) : 0;
 
+      // 並び順は「準備工 → 内訳書の順 → 後片付」で固定する（日付を動かしても入れ替わらない）
+      var ord = M.nextTaskOrder(site.id);
+      if (common !== null) {
+        Store.put('tasks', {
+          siteId: site.id, group: '共通仮設費', name: '準備工', amount: prep, costKind: 'prep',
+          planStart: from, planEnd: U.addDays(from, head), order: ord++, progress: 0, weight: null, note: ''
+        });
+      }
+
       use.forEach(function (it, i) {
         var s = U.addDays(bodyFrom, Math.round(i * step));
         var e = U.addDays(s, per - 1);
         if (e > bodyTo) e = bodyTo;
         Store.put('tasks', {
           siteId: site.id, group: it.group, name: it.name, amount: it.amount,
-          planStart: s, planEnd: e, progress: 0, weight: null, note: ''
+          planStart: s, planEnd: e, order: ord++, progress: 0, weight: null, note: ''
         });
       });
 
       if (common !== null) {
         Store.put('tasks', {
-          siteId: site.id, group: '共通仮設費', name: '準備工', amount: prep, costKind: 'prep',
-          planStart: from, planEnd: U.addDays(from, head), progress: 0, weight: null, note: ''
-        });
-        Store.put('tasks', {
           siteId: site.id, group: '共通仮設費', name: '後片付', amount: common - prep, costKind: 'cleanup',
-          planStart: U.addDays(to, -head), planEnd: to, progress: 0, weight: null, note: ''
+          planStart: U.addDays(to, -head), planEnd: to, order: ord++, progress: 0, weight: null, note: ''
         });
       }
 
