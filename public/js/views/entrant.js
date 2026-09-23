@@ -44,6 +44,57 @@
     });
   }
 
+  /** 元請確認欄（事務所でログインした本人の名前でしか付けられない） */
+  function primeOf(e) {
+    return (e && e.approvals && e.approvals.prime) || null;
+  }
+
+  function approveHtml(e) {
+    var user = Session.user;
+    var a = primeOf(e);
+    var html = UI.h2('CHECK', '元請確認') + '<div class="card">';
+    if (a) {
+      var st = U.formatStamp(a.at);
+      var canUndo = Session.isManager() || a.userId === user.id;
+      html += '<div class="approve-row"><div class="approve-role">元請確認欄</div>' +
+        '<div class="approve-done"><span class="badge ok">確認済</span> ' + esc(a.name) +
+        '<span class="muted">（' + esc(st.date + ' ' + st.time) + '）</span></div>' +
+        (canUndo ? '<button class="btn small plain" id="b-unapprove">取消</button>' : '') + '</div>';
+    } else {
+      html += '<p class="section-note">内容を確かめたら、ここで確認を付けてください。' +
+        'あなたの名前（' + esc(user.name) + '）と日時が記録され、印刷する調査票の「元請確認欄」に入ります。</p>' +
+        '<div class="approve-row"><div class="approve-role">元請確認欄</div>' +
+        '<div class="approve-done muted">未確認</div>' +
+        '<button class="btn small" id="b-approve">' + esc(user.name) + ' として確認</button></div>';
+    }
+    return html + '</div>';
+  }
+
+  function bindApprove(e) {
+    U.on('#b-approve', 'click', function () {
+      var user = Session.user;
+      var fresh = Store.get('entrants', e.id);
+      if (!fresh) return U.toast('この調査票は削除されています');
+      fresh.approvals = Object.assign({}, fresh.approvals || {});
+      fresh.approvals.prime = { name: user.name, userId: user.id, at: new Date().toISOString() };
+      if (fresh._unapprove) fresh._unapprove = fresh._unapprove.filter(function (k) { return k !== 'prime'; });
+      Store.put('entrants', fresh);
+      U.toast('元請確認を記録しました');
+      MT.rerender();
+    });
+    U.on('#b-unapprove', 'click', function () {
+      if (!confirm('元請確認を取り消します。よろしいですか？')) return;
+      var fresh = Store.get('entrants', e.id);
+      if (!fresh) return;
+      fresh.approvals = Object.assign({}, fresh.approvals || {});
+      delete fresh.approvals.prime;
+      fresh._unapprove = (fresh._unapprove || []).concat(['prime']);
+      Store.put('entrants', fresh);
+      U.toast('取り消しました');
+      MT.rerender();
+    });
+  }
+
   /*
    * 送り終えたものは、この端末から消す（現場に個人情報を残さないため）。
    * 「誰がこの端末を使っているか」が分かる前に動かしてはいけない。
@@ -91,24 +142,31 @@
   MT.siteTabs.entrant = {
     label: '入場者',
     badge: function (site) {
-      var n = listOf(site.id).length;
-      return n ? String(n) : '';
+      var n = listOf(site.id).filter(function (e) { return !primeOf(e); }).length;
+      return n ? '未確認' + n : '';
     },
     render: function (site) {
       var sid = encodeURIComponent(site.id);
       var all = listOf(site.id);
+      var waiting = all.filter(function (e) { return !primeOf(e); }).length;
       var html = UI.h2('ENTRY', '新規入場者調査票');
       if (!all.length) {
         html += UI.empty('まだ提出がありません。現場のQRから書いてもらえます。');
       } else {
+        if (waiting) {
+          html += UI.alert('warn', '<strong>元請確認がまだの調査票が ' + waiting + ' 件あります。</strong>' +
+            '内容を確かめて、それぞれの画面で確認を付けてください。');
+        }
         html += '<ul class="list">' + all.map(function (e) {
           var tags = [];
+          var a = primeOf(e);
+          tags.push(a ? { cls: 'done', text: '元請確認済' } : { cls: 'warn', text: '元請確認まち' });
           if (e.alone === 'yes') tags.push({ cls: e.roshi === 'yes' ? 'none' : 'ng', text: e.roshi === 'yes' ? '一人親方・労災加入' : '一人親方・未加入' });
           if (e.health === 'no') tags.push({ cls: 'warn', text: '健診未受診' });
           if (e.condition === '3') tags.push({ cls: 'warn', text: '体調に不安' });
           return '<li>' + UI.rowLink('#/entrant/' + encodeURIComponent(e.id), {
             count: Number(e.date.slice(8)), unit: Number(e.date.slice(5, 7)) + '月',
-            countClass: 'done',
+            countClass: a ? 'done' : '',
             main: e.name || '（氏名なし）',
             subHtml: esc([e.belong || e.company, e.job].filter(Boolean).join('　／　')),
             tags: tags
@@ -376,9 +434,12 @@
         ? '<p class="muted">自筆のサインはありません。入力された氏名：' + esc(e.sign || e.name || '－') + '</p>'
         : '<div class="sign-view">' + Sign.svg(e.signInk) + '</div>') + '</div>';
 
+    html += approveHtml(e);
+
     html += UI.btnRow('<a class="btn secondary" href="#/entrant/' + id + '/edit">修正する</a>' +
       '<a class="btn plain" href="#/print/entrant?id=' + id + '">印刷（参考様式第4号）</a>');
     U.app().innerHTML = html;
+    bindApprove(e);
   });
 
   /* ------------------------------------------------------------------ *
@@ -414,7 +475,14 @@
       '<span class="en-title">新規入場者調査票</span>' +
       '<span class="en-day">新規入場日　' + esc(U.formatDate(e.date)) + '</span></div>' +
       '<table class="meta"><tbody>' +
-      '<tr><th>作業所</th><td>' + esc(site.name || '') + '</td><th>元請確認欄</th><td></td></tr>' +
+      '<tr><th>作業所</th><td>' + esc(site.name || '') + '</td><th>元請確認欄</th><td class="en-check">' +
+      (function () {
+        var a = primeOf(e);
+        if (!a) return '';
+        var st = U.formatStamp(a.at);
+        return '<span class="en-check-name">' + esc(a.name) + '</span>' +
+          '<span class="en-check-at">' + esc(st.date) + '</span>';
+      })() + '</td></tr>' +
       '</tbody></table>' +
       '<p class="en-note">下記調査票の個人情報については、安全衛生管理および緊急時の連絡・対応のために使用いたします。' +
       'また、当社において厳重に管理し、法令に定める場合を除き、第三者には提供いたしません。不要となった時は、責任を持って処分いたします。</p>' +

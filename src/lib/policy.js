@@ -112,12 +112,16 @@ function sameApproval(a, b) {
 }
 
 /**
- * 確認欄（現場代理人・主任技術者）の書き換えを検査する。
+ * 確認欄の書き換えを検査する。
+ *   manager  … 点検記録の現場代理人
+ *   engineer … 点検記録の主任技術者
+ *   prime    … 新規入場者調査票の元請確認欄
+ *
  *   ・新しく付ける確認は、ログイン中の本人の名前でしか付けられない
  *   ・取り消しは、本人か管理者だけ（明示的な取り消しの指示 _unapprove がある場合のみ）
  *   ・古い画面から送られて確認が抜けていても、サーバー側の確認は消さない
  */
-export const APPROVAL_KEYS = ['manager', 'engineer'];
+export const APPROVAL_KEYS = ['manager', 'engineer', 'prime'];
 
 export function mergeApprovals(user, prevApprovals, data) {
   const prev = isPlainObject(prevApprovals) ? prevApprovals : {};

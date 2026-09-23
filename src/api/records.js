@@ -128,15 +128,14 @@ export async function adminPush({ request, env }) {
         rejected.push({ id: row.id, code: 'kind_conflict' });
         continue;
       }
-      if (row.kind === 'inspections') {
-        const merged = mergeApprovals(user, ex ? ex.approvals : null, row.data);
-        if (merged.error) {
-          rejected.push({ id: row.id, code: merged.error });
-          continue;
-        }
-        if (merged.value) row.data.approvals = merged.value;
-        else delete row.data.approvals;
+      // 確認欄は、どの種別でも「ログイン中の本人の名前でしか付けられない」
+      const merged = mergeApprovals(user, ex ? ex.approvals : null, row.data);
+      if (merged.error) {
+        rejected.push({ id: row.id, code: merged.error });
+        continue;
       }
+      if (merged.value) row.data.approvals = merged.value;
+      else delete row.data.approvals;
       delete row.data._unapprove;
       row.data._by = user.name;
       accepted.push({ id: row.id, space: space(env), kind: row.kind, data: row.data, deleted: row.deleted });
@@ -304,11 +303,9 @@ export async function fieldPush({ request, env }) {
         rejected.push({ id: row.id, code: 'bad_reference' });
         continue;
       }
-      if (row.kind === 'inspections') {
-        // 確認欄（元請）は事務所でしか付けられない。現場からの送信では今の状態を保つ
-        if (ex && ex.approvals) row.data.approvals = ex.approvals;
-        else delete row.data.approvals;
-      }
+      // 確認欄（元請）は事務所でしか付けられない。現場からの送信では今の状態を保つ
+      if (ex && ex.approvals) row.data.approvals = ex.approvals;
+      else delete row.data.approvals;
       delete row.data._unapprove;
       row.data._by = 'QR';
       accepted.push({ id: row.id, space: space(env), kind: row.kind, data: row.data, deleted: false });
