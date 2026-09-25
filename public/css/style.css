@@ -1481,6 +1481,16 @@ ul.en-pledge { margin: 0 0 8px; padding-left: 1.2em; font-size: 10.5px; line-hei
   background: var(--paper);
   box-shadow: var(--shadow);
 }
+/* 縦に持ったスマホでは、記入台ごと横向きにする（端末を横にして書く） */
+.sign-overlay.turn { padding: 0; }
+.sign-overlay.turn .sign-sheet {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  flex: none;
+  transform: translate(-50%, -50%) rotate(90deg);
+  transform-origin: center center;
+}
 .sign-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .sign-title { font-weight: 700; font-size: 15px; }
 .sign-x {

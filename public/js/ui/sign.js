@@ -186,11 +186,24 @@
    * ------------------------------------------------------------------ */
   var pad = null;
 
+  /**
+   * 縦に持ったスマホ・タブレットでは、記入台を横向きにする。
+   * 端末の回転ロックが入っていても横で書けるよう、画面の向きではなく
+   * 記入台のほうを90度まわす。端末を横にすれば、ふつうの向きに戻す。
+   */
+  function wantTurn() {
+    var w = global.innerWidth || 0, h = global.innerHeight || 0;
+    if (!w || !h) return false;
+    /* スマホを縦に持っているときだけ。タブレットやパソコンは、そのまま */
+    return w <= 560 && h > w * 1.05;
+  }
+
   function closePad() {
     if (!pad) return;
     if (pad.el.parentNode) pad.el.parentNode.removeChild(pad.el);
     document.body.style.overflow = pad.overflow;
     global.removeEventListener('resize', pad.onResize);
+    global.removeEventListener('orientationchange', pad.onResize);
     pad = null;
   }
 
@@ -204,7 +217,7 @@
       '<button type="button" class="sign-x" data-act="cancel" aria-label="やめる">×</button></div>' +
       '<div class="sign-area"><canvas></canvas><span class="sign-base"></span>' +
       '<span class="sign-hint">この線の上に署名してください' +
-      '<small>指・タッチペン・マウスで書けます</small></span></div>' +
+      '<small class="sign-how">指・タッチペン・マウスで書けます</small></span></div>' +
       '<div class="sign-actions">' +
       '<button type="button" class="btn plain" data-act="undo">1つ戻す</button>' +
       '<button type="button" class="btn plain" data-act="clear">全部消す</button>' +
@@ -212,14 +225,17 @@
       '</div></div>';
     document.body.appendChild(el);
 
+    var sheet = el.querySelector('.sign-sheet');
     var area = el.querySelector('.sign-area');
     var canvas = el.querySelector('canvas');
     var hint = el.querySelector('.sign-hint');
+    var how = el.querySelector('.sign-how');
     var ctx = canvas.getContext('2d');
     var strokes = [];
     var cur = null;
     var size = { w: 0, h: 0 };
     var lw = 3;
+    var turned = false;      // 記入台を90度まわしているか
 
     function style() {
       ctx.lineWidth = lw;
@@ -256,7 +272,9 @@
 
     function fit() {
       var r = area.getBoundingClientRect();
-      var w = Math.max(80, Math.round(r.width)), h = Math.max(80, Math.round(r.height));
+      /* まわしているときは、画面の縦横と記入台の縦横が入れ替わる */
+      var w = Math.max(80, Math.round(turned ? r.height : r.width));
+      var h = Math.max(80, Math.round(turned ? r.width : r.height));
       var k = size.w ? Math.min(w / size.w, h / size.h) : 1;
       if (size.w && k !== 1) {
         strokes = strokes.map(function (s) {
@@ -292,7 +310,33 @@
 
     function at(ev) {
       var r = canvas.getBoundingClientRect();
+      /* 90度まわしているときは、指の位置も同じだけ戻してから使う
+         （記入台の左上は、画面では右上にあたる） */
+      if (turned) return { x: ev.clientY - r.top, y: r.right - ev.clientX };
       return { x: ev.clientX - r.left, y: ev.clientY - r.top };
+    }
+
+    /* 画面の向きに合わせて、記入台をまわす・戻す */
+    function layout() {
+      var want = wantTurn();
+      if (want !== turned) {
+        turned = want;
+        if (el.classList) el.classList[want ? 'add' : 'remove']('turn');
+        if (how) {
+          how.textContent = want
+            ? 'スマホを横にして、指・タッチペンで書いてください'
+            : '指・タッチペン・マウスで書けます';
+        }
+      }
+      if (turned) {
+        var m = 12;
+        sheet.style.width = Math.max(240, (global.innerHeight || 640) - m * 2) + 'px';
+        sheet.style.height = Math.max(200, (global.innerWidth || 360) - m * 2) + 'px';
+      } else {
+        sheet.style.width = '';
+        sheet.style.height = '';
+      }
+      fit();
     }
 
     function add(p) {
@@ -344,10 +388,11 @@
       closePad();
     });
 
-    pad = { el: el, overflow: document.body.style.overflow, onResize: fit };
+    pad = { el: el, overflow: document.body.style.overflow, onResize: layout };
     document.body.style.overflow = 'hidden';
     global.addEventListener('resize', pad.onResize);
-    fit();
+    global.addEventListener('orientationchange', pad.onResize);
+    layout();
   }
 
   document.addEventListener('click', function (ev) {
